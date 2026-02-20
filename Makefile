@@ -3,6 +3,10 @@
 BINARY := bin/gateway
 CMD     := ./cmd/gateway
 
+# Load .env.local if it exists (API keys for local dev, never committed)
+-include .env.local
+export
+
 build:
 	go build -o $(BINARY) $(CMD)
 
