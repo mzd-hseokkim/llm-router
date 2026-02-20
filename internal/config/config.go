@@ -12,10 +12,33 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig   `koanf:"server"`
-	Database DatabaseConfig `koanf:"database"`
-	Redis    RedisConfig    `koanf:"redis"`
-	Log      LogConfig      `koanf:"log"`
+	Server    ServerConfig    `koanf:"server"`
+	Database  DatabaseConfig  `koanf:"database"`
+	Redis     RedisConfig     `koanf:"redis"`
+	Log       LogConfig       `koanf:"log"`
+	Providers ProvidersConfig `koanf:"providers"`
+	Gateway   GatewayConfig   `koanf:"gateway"`
+}
+
+type GatewayConfig struct {
+	// MasterKey is the static key required for Admin API access.
+	// Set via env var MASTER_KEY or config file gateway.master_key.
+	MasterKey string `koanf:"master_key"`
+
+	// EncryptionKey is the 32-byte base64-encoded key used to encrypt provider API keys in the DB.
+	// Set via env var ENCRYPTION_KEY.
+	EncryptionKey string `koanf:"encryption_key"`
+}
+
+type ProvidersConfig struct {
+	OpenAI    ProviderConfig `koanf:"openai"`
+	Anthropic ProviderConfig `koanf:"anthropic"`
+	Gemini    ProviderConfig `koanf:"gemini"`
+}
+
+type ProviderConfig struct {
+	APIKey  string `koanf:"api_key"`
+	BaseURL string `koanf:"base_url"`
 }
 
 type ServerConfig struct {
