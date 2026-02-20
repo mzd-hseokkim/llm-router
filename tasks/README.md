@@ -26,11 +26,11 @@ tasks/
 | # | 작업 | 핵심 내용 |
 |---|------|----------|
 | 01 | ✅ [프로젝트 초기 설정](phase1-mvp/01-project-setup.md) | Go 모노레포 구조, Docker Compose, Makefile |
-| 02 | [OpenAI-Compatible API](phase1-mvp/02-openai-compatible-api.md) | `/v1/chat/completions` 등 표준 엔드포인트 |
-| 03 | [Provider 어댑터](phase1-mvp/03-provider-adapters.md) | OpenAI / Anthropic / Gemini 포맷 변환 |
-| 04 | [SSE 스트리밍](phase1-mvp/04-sse-streaming.md) | 실시간 토큰 스트리밍, TCP 청크 경계 처리 |
-| 05 | [Virtual Key 인증](phase1-mvp/05-virtual-key-auth.md) | Gateway 자체 발급 API Key, Redis 캐싱 |
-| 06 | [Provider Key 관리](phase1-mvp/06-provider-key-management.md) | AES-256-GCM 암호화, 다중 키 분산 |
+| 02 | ✅ [OpenAI-Compatible API](phase1-mvp/02-openai-compatible-api.md) | `/v1/chat/completions` 등 표준 엔드포인트 |
+| 03 | ✅ [Provider 어댑터](phase1-mvp/03-provider-adapters.md) | OpenAI / Anthropic / Gemini 포맷 변환 |
+| 04 | ✅ [SSE 스트리밍](phase1-mvp/04-sse-streaming.md) | 실시간 토큰 스트리밍, TCP 청크 경계 처리 |
+| 05 | ✅ [Virtual Key 인증](phase1-mvp/05-virtual-key-auth.md) | Gateway 자체 발급 API Key, Redis 캐싱 |
+| 06 | ✅ [Provider Key 관리](phase1-mvp/06-provider-key-management.md) | AES-256-GCM 암호화, 다중 키 분산 |
 | 07 | [요청 로깅](phase1-mvp/07-request-logging.md) | 비동기 배치 로깅, 월별 파티셔닝 |
 | 08 | [에러 핸들링·재시도](phase1-mvp/08-error-handling-retry.md) | 지수 백오프 + 지터, 오류 정규화 |
 | 09 | [헬스체크](phase1-mvp/09-health-check.md) | Liveness/Readiness probe, Provider 상태 |
@@ -93,6 +93,7 @@ tasks/
 | 06 | [자체 호스팅 모델](phase4-advanced/06-self-hosted-models.md) | Ollama·vLLM·TGI 로컬 모델 연동 |
 | 07 | [차지백/쇼백 리포트](phase4-advanced/07-chargeback-reports.md) | 부서별 비용 할당, 외부 빌링 API |
 | 08 | [MCP Gateway](phase4-advanced/08-mcp-gateway.md) | Model Context Protocol 중앙 허브 |
+| 09 | [OpenAPI 문서](phase4-advanced/09-openapi-docs.md) | Swagger UI, Admin API 명세 자동화 |
 
 **Phase 4 완료 기준**: ML이 최적 Provider를 자동 선택, 팀이 프롬프트를 버전 관리, 자체 GPU도 Gateway로 통합
 
