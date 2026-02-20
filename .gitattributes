@@ -1,0 +1,32 @@
+# 모든 텍스트 파일은 LF로 통일
+* text=auto eol=lf
+
+# Go
+*.go text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf
+
+# Web
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+
+# Config / Docs
+*.yaml text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.env text eol=lf
+Makefile text eol=lf
+
+# Binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
