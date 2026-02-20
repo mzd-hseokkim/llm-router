@@ -1,0 +1,14 @@
+[build]
+  cmd = "go build -o ./tmp/gateway ./cmd/gateway"
+  bin = "./tmp/gateway"
+  full_bin = "./tmp/gateway"
+  include_ext = ["go", "yaml"]
+  exclude_dir = ["tmp", "vendor", "bin"]
+  delay = 1000
+
+[log]
+  time = true
+
+[color]
+  build = "yellow"
+  runner = "green"

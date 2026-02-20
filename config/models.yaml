@@ -1,0 +1,8 @@
+# Model pricing configuration
+# Format:
+# models:
+#   <model-id>:
+#     provider: <provider-name>
+#     input_cost_per_million: <float>   # USD per 1M input tokens
+#     output_cost_per_million: <float>  # USD per 1M output tokens
+models: {}
