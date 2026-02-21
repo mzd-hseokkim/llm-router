@@ -5,10 +5,13 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/llm-router/gateway/internal/budget"
+	"github.com/llm-router/gateway/internal/cost"
 	"github.com/llm-router/gateway/internal/gateway/fallback"
 	"github.com/llm-router/gateway/internal/gateway/handler"
 	"github.com/llm-router/gateway/internal/gateway/middleware"
 	"github.com/llm-router/gateway/internal/provider"
+	"github.com/llm-router/gateway/internal/ratelimit"
 	"github.com/llm-router/gateway/internal/telemetry"
 )
 
@@ -18,6 +21,8 @@ import (
 // authMw is the virtual-key middleware injected from main.
 // logWriter, when non-nil, enables per-request DB logging.
 // recorder, when non-nil, receives provider health events for tracking.
+// rateLimiter, when non-nil, enforces per-key RPM/TPM limits.
+// budgetMgr and costCalc, when non-nil, enforce per-key budget limits.
 func Setup(
 	r chi.Router,
 	registry *provider.Registry,
@@ -27,6 +32,9 @@ func Setup(
 	authMw func(http.Handler) http.Handler,
 	logWriter *telemetry.LogWriter,
 	recorder middleware.RequestRecorder,
+	rateLimiter ratelimit.Limiter,
+	budgetMgr *budget.Manager,
+	costCalc *cost.Calculator,
 ) {
 	r.Use(middleware.Recovery(logger))
 	r.Use(middleware.RequestMeta)
@@ -37,6 +45,14 @@ func Setup(
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(authMw)
+
+		if rateLimiter != nil {
+			r.Use(middleware.RateLimit(rateLimiter))
+		}
+
+		if budgetMgr != nil && costCalc != nil {
+			r.Use(middleware.BudgetCheck(budgetMgr, costCalc, logger))
+		}
 
 		chat := handler.NewChatHandler(fr, logger).WithChains(chains)
 		r.Post("/chat/completions", chat.Handle)

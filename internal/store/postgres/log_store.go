@@ -71,7 +71,115 @@ func (s *LogStore) BatchInsert(ctx context.Context, entries []*telemetry.LogEntr
 			return fmt.Errorf("batch log insert: %w", err)
 		}
 	}
-	return br.Close()
+	if err := br.Close(); err != nil {
+		return err
+	}
+
+	// Aggregate into daily_usage (best-effort; errors are non-fatal).
+	s.upsertDailyUsage(ctx, entries)
+	return nil
+}
+
+// upsertDailyUsage aggregates entries and upserts into the daily_usage table.
+func (s *LogStore) upsertDailyUsage(ctx context.Context, entries []*telemetry.LogEntry) {
+	type key struct {
+		date         string
+		model        string
+		provider     string
+		virtualKeyID string
+	}
+	type agg struct {
+		date             time.Time
+		model            string
+		provider         string
+		virtualKeyID     *uuid.UUID
+		userID           *uuid.UUID
+		teamID           *uuid.UUID
+		orgID            *uuid.UUID
+		requestCount     int
+		promptTokens     int
+		completionTokens int
+		totalTokens      int
+		costUSD          float64
+		errorCount       int
+	}
+
+	sentinel := "00000000-0000-0000-0000-000000000000"
+	grouped := make(map[key]*agg)
+
+	for _, e := range entries {
+		if e.Model == "" {
+			continue
+		}
+		dateStr := e.Timestamp.UTC().Format(time.DateOnly)
+		keyID := sentinel
+		if e.VirtualKeyID != nil {
+			keyID = e.VirtualKeyID.String()
+		}
+		k := key{date: dateStr, model: e.Model, provider: e.Provider, virtualKeyID: keyID}
+
+		a, ok := grouped[k]
+		if !ok {
+			d, _ := time.Parse(time.DateOnly, dateStr)
+			a = &agg{
+				date:         d,
+				model:        e.Model,
+				provider:     e.Provider,
+				virtualKeyID: e.VirtualKeyID,
+				userID:       e.UserID,
+				teamID:       e.TeamID,
+				orgID:        e.OrgID,
+			}
+			grouped[k] = a
+		}
+		a.requestCount++
+		a.promptTokens += e.PromptTokens
+		a.completionTokens += e.CompletionTokens
+		a.totalTokens += e.TotalTokens
+		a.costUSD += e.CostUSD
+		if e.StatusCode >= 500 || e.ErrorCode != "" {
+			a.errorCount++
+		}
+	}
+
+	if len(grouped) == 0 {
+		return
+	}
+
+	const q = `
+		INSERT INTO daily_usage (
+			date, model, provider, virtual_key_id,
+			user_id, team_id, org_id,
+			request_count, prompt_tokens, completion_tokens, total_tokens, cost_usd, error_count
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		ON CONFLICT (date, model, provider, virtual_key_id) DO UPDATE SET
+			request_count     = daily_usage.request_count     + EXCLUDED.request_count,
+			prompt_tokens     = daily_usage.prompt_tokens     + EXCLUDED.prompt_tokens,
+			completion_tokens = daily_usage.completion_tokens + EXCLUDED.completion_tokens,
+			total_tokens      = daily_usage.total_tokens      + EXCLUDED.total_tokens,
+			cost_usd          = daily_usage.cost_usd          + EXCLUDED.cost_usd,
+			error_count       = daily_usage.error_count       + EXCLUDED.error_count`
+
+	sentinelUUID := uuid.MustParse("00000000-0000-0000-0000-000000000000")
+	batch := &pgx.Batch{}
+	for _, a := range grouped {
+		keyID := sentinelUUID
+		if a.virtualKeyID != nil {
+			keyID = *a.virtualKeyID
+		}
+		batch.Queue(q,
+			a.date, a.model, a.provider, keyID,
+			uuidPtrToParam(a.userID), uuidPtrToParam(a.teamID), uuidPtrToParam(a.orgID),
+			a.requestCount, a.promptTokens, a.completionTokens, a.totalTokens,
+			a.costUSD, a.errorCount,
+		)
+	}
+
+	br := s.pool.SendBatch(ctx, batch)
+	defer br.Close()
+	for range grouped {
+		br.Exec() //nolint:errcheck — best-effort
+	}
 }
 
 // LogFilter specifies optional filter parameters for listing log entries.

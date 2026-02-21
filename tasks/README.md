@@ -47,9 +47,9 @@ tasks/
 |---|------|----------|
 | 01 | ✅ [폴백/페일오버 체인](phase2-stability/01-failover-fallback.md) | 서킷 브레이커, 자동 Provider 전환 |
 | 02 | ✅ [가중 로드 밸런싱](phase2-stability/02-load-balancing.md) | 가중 랜덤·최소 레이턴시·최소 비용 전략 |
-| 03 | [요청률 제한 (RPM/TPM)](phase2-stability/03-rate-limiting.md) | Token Bucket, 계층적 제한, Redis Lua |
-| 04 | [예산 관리](phase2-stability/04-budget-management.md) | Soft/Hard 예산, 기간별 자동 리셋 |
-| 05 | [비용 추적](phase2-stability/05-cost-tracking.md) | 토큰 카운팅, 모델별 단가 테이블, 일별 집계 |
+| 03 | ✅ [요청률 제한 (RPM/TPM)](phase2-stability/03-rate-limiting.md) | Token Bucket, 계층적 제한, Redis Lua |
+| 04 | ✅ [예산 관리](phase2-stability/04-budget-management.md) | Soft/Hard 예산, 기간별 자동 리셋 |
+| 05 | ✅ [비용 추적](phase2-stability/05-cost-tracking.md) | 토큰 카운팅, 모델별 단가 테이블, 일별 집계 |
 | 06 | [Admin API](phase2-stability/06-admin-api.md) | Key·Provider·모델·라우팅 CRUD, 핫 리로드 |
 | 07 | [Admin 대시보드 UI](phase2-stability/07-admin-dashboard.md) | Next.js, 실시간 메트릭, 로그 뷰어 |
 | 08 | ✅ [추가 Provider](phase2-stability/08-additional-providers.md) | Azure OpenAI, AWS Bedrock, Mistral, Cohere |

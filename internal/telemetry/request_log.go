@@ -59,6 +59,9 @@ type RequestLogContext struct {
 	ErrorMessage     string
 	IsStreaming      bool
 	TTFTAt           time.Time // zero if first-token time was not recorded
+
+	// Set by budget middleware after handler returns
+	CostUSD float64
 }
 
 // NewRequestLogContext injects a fresh RequestLogContext into ctx and returns both.

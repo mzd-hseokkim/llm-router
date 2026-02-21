@@ -12,7 +12,9 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/llm-router/gateway/internal/auth"
+	"github.com/llm-router/gateway/internal/budget"
 	"github.com/llm-router/gateway/internal/config"
+	"github.com/llm-router/gateway/internal/cost"
 	"github.com/llm-router/gateway/internal/crypto"
 	"github.com/llm-router/gateway/internal/gateway/circuitbreaker"
 	"github.com/llm-router/gateway/internal/gateway/fallback"
@@ -28,9 +30,12 @@ import (
 	providergemini "github.com/llm-router/gateway/internal/provider/gemini"
 	providermistral "github.com/llm-router/gateway/internal/provider/mistral"
 	provideropenai "github.com/llm-router/gateway/internal/provider/openai"
+	"github.com/llm-router/gateway/internal/ratelimit"
 	"github.com/llm-router/gateway/internal/server"
 	pgstore "github.com/llm-router/gateway/internal/store/postgres"
+	redistore "github.com/llm-router/gateway/internal/store/redis"
 	"github.com/llm-router/gateway/internal/telemetry"
+	"time"
 )
 
 const version = "1.0.0"
@@ -96,6 +101,27 @@ func main() {
 	logWriter := telemetry.NewLogWriter(logStore, logger)
 	defer logWriter.Close()
 
+	// --- Cost calculator ---
+	costCalc, err := cost.LoadFromYAML("config/models.yaml")
+	if err != nil {
+		logger.Warn("failed to load models pricing; cost tracking disabled", "error", err)
+		costCalc = cost.NewCalculator(nil)
+	} else {
+		logger.Info("model pricing loaded")
+	}
+
+	// --- Rate limiter ---
+	rateLimiter := ratelimit.NewRedisLimiter(redisClient)
+
+	// --- Budget manager ---
+	budgetStore := pgstore.NewBudgetStore(pool)
+	budgetCache := redistore.NewBudgetCache(redisClient)
+	budgetMgr := budget.NewManager(budgetStore, budgetCache, logger)
+
+	budgetScheduler := budget.NewScheduler(budgetMgr, time.Minute, logger)
+	budgetScheduler.Start()
+	defer budgetScheduler.Stop()
+
 	// --- Provider health tracker ---
 	tracker := health.NewProviderTracker()
 
@@ -108,7 +134,8 @@ func main() {
 	r := srv.Router()
 
 	// /v1 routes — protected by virtual key auth
-	router.Setup(r, registry, fr, chains, logger, authMw.Middleware, logWriter, tracker)
+	router.Setup(r, registry, fr, chains, logger, authMw.Middleware, logWriter, tracker,
+		rateLimiter, budgetMgr, costCalc)
 
 	// /ping — unauthenticated liveness stub (kept for backwards compatibility)
 	r.Get("/ping", internalhandler.Ping())
@@ -123,7 +150,8 @@ func main() {
 	r.Handle("/metrics", promhttp.Handler())
 
 	// /admin/* — protected by master key
-	registerAdminRoutes(r, keyStore, keyCache, km, cipher, pool, logStore, cb, cfg, logger)
+	registerAdminRoutes(r, keyStore, keyCache, km, cipher, pool, logStore, cb, cfg, logger,
+		rateLimiter, budgetMgr, budgetStore)
 
 	if err := srv.ListenAndServe(context.Background()); err != nil {
 		logger.Error("server exited with error", "error", err)
@@ -244,6 +272,9 @@ func registerAdminRoutes(
 	cb *circuitbreaker.CircuitBreaker,
 	cfg *config.Config,
 	logger *slog.Logger,
+	rateLimiter *ratelimit.RedisLimiter,
+	budgetMgr *budget.Manager,
+	budgetStore *pgstore.BudgetStore,
 ) {
 	adminMw := auth.AdminAuth(cfg.Gateway.MasterKey)
 
@@ -278,6 +309,22 @@ func registerAdminRoutes(
 		cbHandler := handler.NewAdminCircuitBreakerHandler(cb, logger)
 		r.Get("/admin/circuit-breakers", cbHandler.List)
 		r.Post("/admin/circuit-breakers/{provider}/reset", cbHandler.Reset)
+
+		// Rate limit admin endpoints
+		rlHandler := handler.NewAdminRateLimitsHandler(store, rateLimiter)
+		r.Get("/admin/rate-limits/{id}", rlHandler.Get)
+		r.Post("/admin/rate-limits/{id}/reset", rlHandler.Reset)
+
+		// Budget admin endpoints
+		budgetHandler := handler.NewAdminBudgetsHandler(budgetMgr, budgetStore, logger)
+		r.Post("/admin/budgets", budgetHandler.Create)
+		r.Get("/admin/budgets/{entity_type}/{entity_id}", budgetHandler.List)
+		r.Post("/admin/budgets/{id}/reset", budgetHandler.Reset)
+
+		// Usage summary endpoints
+		usageStore := pgstore.NewUsageStore(pool)
+		usageHandler := handler.NewAdminUsageHandler(usageStore)
+		r.Get("/admin/usage/summary", usageHandler.Summary)
 	})
 }
 

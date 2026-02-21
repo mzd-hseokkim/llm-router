@@ -50,6 +50,7 @@ func RequestLogger(w *telemetry.LogWriter, logger *slog.Logger, recorder Request
 				PromptTokens:     lc.PromptTokens,
 				CompletionTokens: lc.CompletionTokens,
 				TotalTokens:      lc.TotalTokens,
+				CostUSD:          lc.CostUSD,
 				FinishReason:     lc.FinishReason,
 				ErrorCode:        lc.ErrorCode,
 				ErrorMessage:     lc.ErrorMessage,
