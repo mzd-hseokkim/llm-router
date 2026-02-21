@@ -1,26 +1,27 @@
 package mcp
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
-	"net/url"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
+
+// maxWSMessageBytes limits incoming WebSocket message size to 4 MB.
+const maxWSMessageBytes = 4 << 20
 
 type wsServer struct {
 	cfg    ServerConfig
 	logger *slog.Logger
 
 	mu        sync.Mutex
-	conn      *wsConn
+	conn      *websocket.Conn
 	connected bool
 
 	nextID  atomic.Int64
@@ -34,10 +35,15 @@ func newWSServer(cfg ServerConfig) *wsServer {
 func (s *wsServer) Name() string { return s.cfg.Name }
 
 func (s *wsServer) Connect(ctx context.Context) error {
-	conn, err := dialWS(ctx, s.cfg.URL, s.authHeaders())
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 15 * time.Second,
+	}
+	conn, _, err := dialer.DialContext(ctx, s.cfg.URL, s.authHeaders())
 	if err != nil {
 		return fmt.Errorf("websocket: dial %s: %w", s.cfg.URL, err)
 	}
+	conn.SetReadLimit(maxWSMessageBytes)
+
 	s.mu.Lock()
 	s.conn = conn
 	s.connected = true
@@ -64,7 +70,10 @@ func (s *wsServer) Close() error {
 	defer s.mu.Unlock()
 	s.connected = false
 	if s.conn != nil {
-		return s.conn.close()
+		err := s.conn.WriteMessage(websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+		_ = err
+		return s.conn.Close()
 	}
 	return nil
 }
@@ -157,18 +166,19 @@ func (s *wsServer) wsSend(id int64, method string, params any) error {
 	if err != nil {
 		return err
 	}
+
 	s.mu.Lock()
 	conn := s.conn
 	s.mu.Unlock()
 	if conn == nil {
 		return fmt.Errorf("websocket: not connected")
 	}
-	return conn.write(b)
+	return conn.WriteMessage(websocket.TextMessage, b)
 }
 
 func (s *wsServer) readLoop() {
 	for {
-		msg, err := s.conn.read()
+		_, msg, err := s.conn.ReadMessage()
 		if err != nil {
 			s.mu.Lock()
 			s.connected = false
@@ -200,146 +210,4 @@ func (s *wsServer) authHeaders() http.Header {
 		h.Set("Authorization", req.Header.Get("Authorization"))
 	}
 	return h
-}
-
-// --- minimal WebSocket client ---
-
-type wsConn struct {
-	conn net.Conn
-	r    *bufio.Reader
-	mu   sync.Mutex
-}
-
-func dialWS(ctx context.Context, rawURL string, headers http.Header) (*wsConn, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return nil, err
-	}
-	if u.Scheme == "wss" {
-		return nil, fmt.Errorf("wss not supported; use ws://")
-	}
-
-	host := u.Host
-	if u.Port() == "" {
-		host += ":80"
-	}
-
-	dialer := &net.Dialer{}
-	conn, err := dialer.DialContext(ctx, "tcp", host)
-	if err != nil {
-		return nil, err
-	}
-
-	path := u.RequestURI()
-	if path == "" {
-		path = "/"
-	}
-	reqStr := fmt.Sprintf(
-		"GET %s HTTP/1.1\r\nHost: %s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n",
-		path, u.Host)
-	for k, vs := range headers {
-		for _, v := range vs {
-			reqStr += k + ": " + v + "\r\n"
-		}
-	}
-	reqStr += "\r\n"
-
-	if _, err := conn.Write([]byte(reqStr)); err != nil {
-		_ = conn.Close()
-		return nil, err
-	}
-
-	r := bufio.NewReader(conn)
-	statusLine, _ := r.ReadString('\n')
-	if !strings.Contains(statusLine, "101") {
-		_ = conn.Close()
-		return nil, fmt.Errorf("unexpected status: %s", strings.TrimSpace(statusLine))
-	}
-	for {
-		line, err := r.ReadString('\n')
-		if err != nil || strings.TrimSpace(line) == "" {
-			break
-		}
-	}
-	return &wsConn{conn: conn, r: r}, nil
-}
-
-func (c *wsConn) write(payload []byte) error {
-	frame := wsFrame(payload)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	_, err := c.conn.Write(frame)
-	return err
-}
-
-func (c *wsConn) read() ([]byte, error) {
-	return wsReadFrame(c.r)
-}
-
-func (c *wsConn) close() error {
-	return c.conn.Close()
-}
-
-func wsFrame(payload []byte) []byte {
-	n := len(payload)
-	var f []byte
-	f = append(f, 0x81) // FIN + text
-	switch {
-	case n < 126:
-		f = append(f, byte(n))
-	case n < 65536:
-		f = append(f, 126, byte(n>>8), byte(n))
-	default:
-		f = append(f, 127)
-		for i := 7; i >= 0; i-- {
-			f = append(f, byte(n>>(uint(i)*8)))
-		}
-	}
-	return append(f, payload...)
-}
-
-func wsReadFrame(r *bufio.Reader) ([]byte, error) {
-	_, err := r.ReadByte() // b0: FIN+opcode
-	if err != nil {
-		return nil, err
-	}
-	b1, err := r.ReadByte()
-	if err != nil {
-		return nil, err
-	}
-	masked := b1&0x80 != 0
-	payloadLen := int64(b1 & 0x7f)
-	switch payloadLen {
-	case 126:
-		var buf [2]byte
-		if _, err := r.Read(buf[:]); err != nil {
-			return nil, err
-		}
-		payloadLen = int64(buf[0])<<8 | int64(buf[1])
-	case 127:
-		var buf [8]byte
-		if _, err := r.Read(buf[:]); err != nil {
-			return nil, err
-		}
-		payloadLen = 0
-		for _, bv := range buf {
-			payloadLen = (payloadLen << 8) | int64(bv)
-		}
-	}
-	var maskKey [4]byte
-	if masked {
-		if _, err := r.Read(maskKey[:]); err != nil {
-			return nil, err
-		}
-	}
-	payload := make([]byte, payloadLen)
-	if _, err := r.Read(payload); err != nil {
-		return nil, err
-	}
-	if masked {
-		for i := range payload {
-			payload[i] ^= maskKey[i%4]
-		}
-	}
-	return payload, nil
 }

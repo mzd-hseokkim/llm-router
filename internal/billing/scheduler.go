@@ -54,6 +54,11 @@ func (s *Scheduler) run() {
 }
 
 func (s *Scheduler) generate(now time.Time) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("billing scheduler: panic", "recovered", r)
+		}
+	}()
 	// Compute previous-month range.
 	firstOfMonth := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 	from := firstOfMonth.AddDate(0, -1, 0)

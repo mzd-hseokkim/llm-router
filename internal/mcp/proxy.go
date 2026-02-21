@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 )
@@ -267,19 +269,65 @@ type resultCache struct {
 	mu      sync.Mutex
 	entries map[string]cacheEntry
 	ttl     time.Duration
+	stop    chan struct{}
 }
 
 func newResultCache(ttl time.Duration) *resultCache {
 	c := &resultCache{
 		entries: make(map[string]cacheEntry),
 		ttl:     ttl,
+		stop:    make(chan struct{}),
 	}
+	go c.cleanup()
 	return c
 }
 
+// cleanup removes expired entries every ttl/2 (minimum 30s).
+func (c *resultCache) cleanup() {
+	interval := c.ttl / 2
+	if interval < 30*time.Second {
+		interval = 30 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.stop:
+			return
+		case <-ticker.C:
+			now := time.Now()
+			c.mu.Lock()
+			for k, e := range c.entries {
+				if now.After(e.expiresAt) {
+					delete(c.entries, k)
+				}
+			}
+			c.mu.Unlock()
+		}
+	}
+}
+
+// key builds a deterministic cache key from the request fields.
+// Arguments keys are sorted to ensure map-order independence.
 func (c *resultCache) key(req *ToolCallRequest) string {
-	b, _ := json.Marshal(req)
-	return string(b)
+	h := fnv.New64a()
+	h.Write([]byte(req.Server))
+	h.Write([]byte("\x00"))
+	h.Write([]byte(req.Tool))
+	h.Write([]byte("\x00"))
+
+	// Stable ordering of argument keys.
+	keys := make([]string, 0, len(req.Arguments))
+	for k := range req.Arguments {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		b, _ := json.Marshal(req.Arguments[k])
+		h.Write([]byte(k))
+		h.Write(b)
+	}
+	return fmt.Sprintf("%x", h.Sum64())
 }
 
 func (c *resultCache) Get(req *ToolCallRequest) ([]ToolContent, bool) {

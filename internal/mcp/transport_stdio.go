@@ -8,10 +8,23 @@ import (
 	"io"
 	"log/slog"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// blockedEnvVars are environment variable names that must not be forwarded to
+// stdio subprocesses because they can be used for library-injection attacks.
+var blockedEnvVars = map[string]struct{}{
+	"LD_PRELOAD":             {},
+	"LD_LIBRARY_PATH":        {},
+	"DYLD_INSERT_LIBRARIES":  {},
+	"DYLD_LIBRARY_PATH":      {},
+	"LD_AUDIT":               {},
+	"LD_DEBUG":               {},
+}
 
 type stdioServer struct {
 	cfg    ServerConfig
@@ -36,8 +49,16 @@ func (s *stdioServer) Connect(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if !filepath.IsAbs(s.cfg.Command) {
+		return fmt.Errorf("stdio: command must be an absolute path, got %q", s.cfg.Command)
+	}
+
 	cmd := exec.CommandContext(ctx, s.cfg.Command, s.cfg.Args...)
 	for k, v := range s.cfg.Env {
+		upper := strings.ToUpper(k)
+		if _, blocked := blockedEnvVars[upper]; blocked {
+			return fmt.Errorf("stdio: env var %q is not allowed", k)
+		}
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 
@@ -56,7 +77,7 @@ func (s *stdioServer) Connect(ctx context.Context) error {
 	s.cmd = cmd
 	s.stdin = stdin
 	s.scanner = bufio.NewScanner(stdout)
-	s.scanner.Buffer(make([]byte, 4<<20), 4<<20)
+	s.scanner.Buffer(make([]byte, 512<<10), 512<<10)
 
 	go s.readLoop()
 

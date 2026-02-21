@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/llm-router/gateway/internal/mcp"
@@ -59,6 +60,16 @@ func (h *AdminMCPHandler) RegisterServer(w http.ResponseWriter, r *http.Request)
 	if cfg.Name == "" || cfg.Type == "" {
 		http.Error(w, "name and type are required", http.StatusBadRequest)
 		return
+	}
+	if cfg.Type == "stdio" {
+		if cfg.Command == "" {
+			http.Error(w, "stdio type requires a command", http.StatusBadRequest)
+			return
+		}
+		if !filepath.IsAbs(cfg.Command) {
+			http.Error(w, "stdio command must be an absolute path", http.StatusBadRequest)
+			return
+		}
 	}
 
 	s := mcp.NewServer(cfg)

@@ -54,6 +54,11 @@ func (s *Scheduler) run() {
 }
 
 func (s *Scheduler) tick() {
+	defer func() {
+		if r := recover(); r != nil {
+			s.logger.Error("budget scheduler: panic", "recovered", r)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 

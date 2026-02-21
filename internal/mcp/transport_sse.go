@@ -16,9 +16,10 @@ import (
 )
 
 type sseServer struct {
-	cfg    ServerConfig
-	logger *slog.Logger
-	client *http.Client
+	cfg        ServerConfig
+	logger     *slog.Logger
+	sseClient  *http.Client // long-lived SSE stream: no timeout (ctx-controlled)
+	postClient *http.Client // short POST requests: 30 s timeout
 
 	mu        sync.Mutex
 	postURL   string
@@ -31,9 +32,10 @@ type sseServer struct {
 
 func newSSEServer(cfg ServerConfig) *sseServer {
 	return &sseServer{
-		cfg:    cfg,
-		logger: slog.Default(),
-		client: &http.Client{Timeout: 0},
+		cfg:        cfg,
+		logger:     slog.Default(),
+		sseClient:  &http.Client{Timeout: 0}, // SSE stream is terminated via ctx
+		postClient: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -191,7 +193,7 @@ func (s *sseServer) postMessage(id int64, method string, params any) error {
 	httpReq.Header.Set("Content-Type", "application/json")
 	s.applyAuth(httpReq)
 
-	resp, err := s.client.Do(httpReq)
+	resp, err := s.postClient.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("sse: post: %w", err)
 	}
@@ -225,7 +227,7 @@ func (s *sseServer) sseLoop(ctx context.Context, url string, endpointCh chan str
 	req.Header.Set("Accept", "text/event-stream")
 	s.applyAuth(req)
 
-	resp, err := s.client.Do(req)
+	resp, err := s.sseClient.Do(req)
 	if err != nil {
 		errCh <- err
 		return
