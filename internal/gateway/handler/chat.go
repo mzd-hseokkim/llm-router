@@ -11,6 +11,7 @@ import (
 	"github.com/llm-router/gateway/internal/gateway/proxy"
 	"github.com/llm-router/gateway/internal/gateway/types"
 	"github.com/llm-router/gateway/internal/provider"
+	"github.com/llm-router/gateway/internal/telemetry"
 )
 
 // ChatHandler handles POST /v1/chat/completions.
@@ -52,7 +53,10 @@ func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	telemetry.SetModel(r.Context(), req.Model, parsed.Provider)
+
 	if req.Stream {
+		telemetry.SetStreaming(r.Context())
 		h.handleStream(w, r, &req, body, p, parsed)
 		return
 	}
@@ -63,8 +67,16 @@ func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			"provider", parsed.Provider,
 			"model", parsed.Model,
 			"error", err)
+		telemetry.SetError(r.Context(), "api_error", err.Error())
 		writeError(w, http.StatusBadGateway, err.Error(), "api_error", "")
 		return
+	}
+
+	if resp.Usage != nil {
+		telemetry.SetTokens(r.Context(), resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
+	}
+	if len(resp.Choices) > 0 {
+		telemetry.SetFinishReason(r.Context(), resp.Choices[0].FinishReason)
 	}
 
 	writeJSON(w, http.StatusOK, resp)

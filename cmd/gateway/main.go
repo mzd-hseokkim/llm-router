@@ -22,6 +22,7 @@ import (
 	provideropenai "github.com/llm-router/gateway/internal/provider/openai"
 	"github.com/llm-router/gateway/internal/server"
 	pgstore "github.com/llm-router/gateway/internal/store/postgres"
+	"github.com/llm-router/gateway/internal/telemetry"
 )
 
 func main() {
@@ -69,17 +70,22 @@ func main() {
 	registry.Register(providergemini.NewManaged(km, cfg.Providers.Gemini.BaseURL))
 	logger.Info("providers registered", "count", 3)
 
+	// --- Request logging ---
+	logStore := pgstore.NewLogStore(pool)
+	logWriter := telemetry.NewLogWriter(logStore, logger)
+	defer logWriter.Close()
+
 	// --- HTTP server ---
 	srv := server.New(cfg.Server, logger)
 
 	// /v1 routes — protected by virtual key auth
-	router.Setup(srv.Router(), registry, logger, authMw.Middleware)
+	router.Setup(srv.Router(), registry, logger, authMw.Middleware, logWriter)
 
 	// /ping — unauthenticated
 	srv.Router().Get("/ping", internalhandler.Ping())
 
 	// /admin/* — protected by master key
-	registerAdminRoutes(srv.Router(), keyStore, keyCache, km, cipher, pool, cfg, logger)
+	registerAdminRoutes(srv.Router(), keyStore, keyCache, km, cipher, pool, logStore, cfg, logger)
 
 	if err := srv.ListenAndServe(context.Background()); err != nil {
 		logger.Error("server exited with error", "error", err)
@@ -127,6 +133,7 @@ func registerAdminRoutes(
 	km *provider.KeyManager,
 	cipher *crypto.Cipher,
 	pool *pgxpool.Pool,
+	logStore *pgstore.LogStore,
 	cfg *config.Config,
 	logger *slog.Logger,
 ) {
@@ -154,6 +161,10 @@ func registerAdminRoutes(
 			r.Delete("/admin/provider-keys/{id}", pkHandler.Delete)
 			r.Put("/admin/provider-keys/{id}/rotate", pkHandler.Rotate)
 		}
+
+		// Request log query
+		logsHandler := handler.NewAdminLogsHandler(logStore)
+		r.Get("/admin/logs", logsHandler.List)
 	})
 }
 

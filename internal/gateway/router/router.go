@@ -8,12 +8,18 @@ import (
 	"github.com/llm-router/gateway/internal/gateway/handler"
 	"github.com/llm-router/gateway/internal/gateway/middleware"
 	"github.com/llm-router/gateway/internal/provider"
+	"github.com/llm-router/gateway/internal/telemetry"
 )
 
 // Setup registers all /v1 API routes on the given chi router.
 // authMw is the virtual-key middleware injected from main; it replaces the stub.
-func Setup(r chi.Router, registry *provider.Registry, logger *slog.Logger, authMw func(http.Handler) http.Handler) {
+// logWriter, when non-nil, enables per-request DB logging.
+func Setup(r chi.Router, registry *provider.Registry, logger *slog.Logger, authMw func(http.Handler) http.Handler, logWriter *telemetry.LogWriter) {
 	r.Use(middleware.RequestMeta)
+
+	if logWriter != nil {
+		r.Use(middleware.RequestLogger(logWriter, logger))
+	}
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(authMw)

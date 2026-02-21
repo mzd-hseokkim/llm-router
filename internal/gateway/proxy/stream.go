@@ -10,6 +10,7 @@ import (
 
 	"github.com/llm-router/gateway/internal/gateway/types"
 	"github.com/llm-router/gateway/internal/provider"
+	"github.com/llm-router/gateway/internal/telemetry"
 )
 
 const (
@@ -103,9 +104,20 @@ func StreamToClient(
 				logger.Error("stream chunk error",
 					"provider", parsed.Provider,
 					"error", chunk.Error)
+				telemetry.SetError(ctx, "stream_error", chunk.Error.Error())
 				writeSSEError(w, chunk.Error.Error())
 				flusher.Flush()
 				return
+			}
+
+			if chunk.Delta != "" {
+				telemetry.RecordTTFT(ctx)
+			}
+			if chunk.Usage != nil {
+				telemetry.SetTokens(ctx, chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, chunk.Usage.TotalTokens)
+			}
+			if chunk.FinishReason != nil {
+				telemetry.SetFinishReason(ctx, *chunk.FinishReason)
 			}
 
 			resetWriteDeadline(rc)

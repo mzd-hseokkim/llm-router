@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/llm-router/gateway/internal/gateway/types"
+	"github.com/llm-router/gateway/internal/telemetry"
 )
 
 // VirtualKeyMiddleware validates incoming Bearer tokens against virtual keys.
@@ -92,6 +93,9 @@ func (m *VirtualKeyMiddleware) Middleware(next http.Handler) http.Handler {
 		case m.lastUsedCh <- lastUsedUpdate{keyHash: keyHash}:
 		default: // drop if channel is full — acceptable
 		}
+
+		// 5. Record key ownership in the log context (if present).
+		telemetry.SetVirtualKeyInfo(r.Context(), &key.ID, key.UserID, key.TeamID, key.OrgID)
 
 		next.ServeHTTP(w, r.WithContext(SetVirtualKey(r.Context(), key)))
 	})

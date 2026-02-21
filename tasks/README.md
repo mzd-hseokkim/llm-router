@@ -31,7 +31,7 @@ tasks/
 | 04 | ✅ [SSE 스트리밍](phase1-mvp/04-sse-streaming.md) | 실시간 토큰 스트리밍, TCP 청크 경계 처리 |
 | 05 | ✅ [Virtual Key 인증](phase1-mvp/05-virtual-key-auth.md) | Gateway 자체 발급 API Key, Redis 캐싱 |
 | 06 | ✅ [Provider Key 관리](phase1-mvp/06-provider-key-management.md) | AES-256-GCM 암호화, 다중 키 분산 |
-| 07 | [요청 로깅](phase1-mvp/07-request-logging.md) | 비동기 배치 로깅, 월별 파티셔닝 |
+| 07 | ✅ [요청 로깅](phase1-mvp/07-request-logging.md) | 비동기 배치 로깅, 월별 파티셔닝 |
 | 08 | [에러 핸들링·재시도](phase1-mvp/08-error-handling-retry.md) | 지수 백오프 + 지터, 오류 정규화 |
 | 09 | [헬스체크](phase1-mvp/09-health-check.md) | Liveness/Readiness probe, Provider 상태 |
 
