@@ -16,13 +16,8 @@ import (
 )
 
 // Setup registers all /v1 API routes on the given chi router.
-// fr is the fallback router that handles circuit-breaker-gated failover.
-// chains are optional named fallback chains from routing config.
-// authMw is the virtual-key middleware injected from main.
-// logWriter, when non-nil, enables per-request DB logging.
-// recorder, when non-nil, receives provider health events for tracking.
-// rateLimiter, when non-nil, enforces per-key RPM/TPM limits.
-// budgetMgr and costCalc, when non-nil, enforce per-key budget limits.
+// Returns the ChatHandler so callers can subscribe to routing config changes
+// via ChatHandler.SetChains.
 func Setup(
 	r chi.Router,
 	registry *provider.Registry,
@@ -35,7 +30,7 @@ func Setup(
 	rateLimiter ratelimit.Limiter,
 	budgetMgr *budget.Manager,
 	costCalc *cost.Calculator,
-) {
+) *handler.ChatHandler {
 	r.Use(middleware.Recovery(logger))
 	r.Use(middleware.RequestMeta)
 
@@ -43,6 +38,7 @@ func Setup(
 		r.Use(middleware.RequestLogger(logWriter, logger, recorder))
 	}
 
+	var chat *handler.ChatHandler
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(authMw)
 
@@ -54,7 +50,7 @@ func Setup(
 			r.Use(middleware.BudgetCheck(budgetMgr, costCalc, logger))
 		}
 
-		chat := handler.NewChatHandler(fr, logger).WithChains(chains)
+		chat = handler.NewChatHandler(fr, logger).WithChains(chains)
 		r.Post("/chat/completions", chat.Handle)
 
 		comp := handler.NewCompletionsHandler(registry, logger)
@@ -67,4 +63,6 @@ func Setup(
 		r.Get("/models", models.List)
 		r.Get("/models/*", models.Get) // wildcard handles model IDs with slashes
 	})
+
+	return chat
 }

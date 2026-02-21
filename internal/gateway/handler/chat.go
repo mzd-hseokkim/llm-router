@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/llm-router/gateway/internal/gateway/fallback"
 	"github.com/llm-router/gateway/internal/gateway/proxy"
@@ -19,6 +20,7 @@ import (
 // ChatHandler handles POST /v1/chat/completions.
 type ChatHandler struct {
 	fallbackRouter *fallback.Router
+	mu             sync.RWMutex
 	chains         map[string]fallback.Chain // name → chain, from routing config
 	logger         *slog.Logger
 }
@@ -34,10 +36,20 @@ func NewChatHandler(fr *fallback.Router, logger *slog.Logger) *ChatHandler {
 
 // WithChains attaches named fallback chains (loaded from routing config).
 func (h *ChatHandler) WithChains(chains []fallback.Chain) *ChatHandler {
-	for _, c := range chains {
-		h.chains[c.Name] = c
-	}
+	h.SetChains(chains)
 	return h
+}
+
+// SetChains replaces the named fallback chains. Safe for concurrent use.
+// Called by the routing store subscriber on hot-reload.
+func (h *ChatHandler) SetChains(chains []fallback.Chain) {
+	m := make(map[string]fallback.Chain, len(chains))
+	for _, c := range chains {
+		m[c.Name] = c
+	}
+	h.mu.Lock()
+	h.chains = m
+	h.mu.Unlock()
 }
 
 // Handle processes a chat completions request.
@@ -150,8 +162,10 @@ func (h *ChatHandler) handleStream(w http.ResponseWriter, r *http.Request, req *
 // If the model matches a configured chain name, that chain is used.
 // Otherwise, a single-target chain is built from the "provider/model" prefix.
 func (h *ChatHandler) resolveChain(model string) fallback.Chain {
-	// Check named chains first (e.g. "default").
-	if c, ok := h.chains[model]; ok {
+	h.mu.RLock()
+	c, ok := h.chains[model]
+	h.mu.RUnlock()
+	if ok {
 		return c
 	}
 

@@ -9,6 +9,7 @@ import (
 	"github.com/llm-router/gateway/internal/auth"
 	"github.com/llm-router/gateway/internal/gateway/types"
 	"github.com/llm-router/gateway/internal/ratelimit"
+	"github.com/llm-router/gateway/internal/telemetry"
 )
 
 // RateLimit returns a middleware that enforces per-key RPM and TPM limits.
@@ -36,11 +37,17 @@ func RateLimit(limiter ratelimit.Limiter) func(http.Handler) http.Handler {
 				}
 			}
 
+			// --- TPM check (pre-flight: blocks if previous requests exceeded limit) ---
+			if CheckTPM(limiter, key, w, r) {
+				return
+			}
+
 			next.ServeHTTP(w, r)
 
-			// --- Post-request: TPM is recorded by the caller via RecordTPM ---
-			// TPM enforcement is "next-request" based: the TPM counter is incremented
-			// after each request, and checked on the following request.
+			// --- TPM record (post-flight: add actual token cost for next-request check) ---
+			if lc := telemetry.GetRequestLogContext(r.Context()); lc != nil {
+				RecordTPM(limiter, key, lc.TotalTokens, r)
+			}
 		})
 	}
 }

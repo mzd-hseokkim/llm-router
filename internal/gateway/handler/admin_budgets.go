@@ -76,6 +76,9 @@ func (h *AdminBudgetsHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Evict the in-memory list cache so the next request sees the new budget immediately.
+	h.mgr.InvalidateListCache(req.EntityType, entityID)
+
 	writeJSON(w, http.StatusCreated, b)
 }
 

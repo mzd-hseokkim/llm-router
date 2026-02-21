@@ -5,20 +5,15 @@
 
 const BASE = "/api/admin";
 
-function getHeaders(): HeadersInit {
-  // Cookie-based auth: the session cookie is sent automatically.
-  // For direct API access, also support ADMIN_KEY env / localStorage.
-  const key =
-    typeof window !== "undefined" ? localStorage.getItem("admin_key") : null;
-  return key ? { Authorization: `Bearer ${key}` } : {};
-}
+// Authorization is handled by the Next.js middleware which reads the
+// httpOnly admin_session cookie and injects the Authorization header.
+// No client-side key storage needed.
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      ...getHeaders(),
       ...init?.headers,
     },
   });
@@ -142,7 +137,7 @@ export const keys = {
       body: JSON.stringify(payload),
     }),
   deactivate: (id: string) =>
-    fetch(`${BASE}/keys/${id}`, { method: "DELETE", headers: getHeaders() }),
+    fetch(`${BASE}/keys/${id}`, { method: "DELETE" }),
   regenerate: (id: string) =>
     apiFetch<{ key: string } & VirtualKey>(`/keys/${id}/regenerate`, { method: "POST" }),
 };

@@ -17,6 +17,10 @@ import (
 // ARGV[4] = current time in milliseconds (Unix)
 //
 // Returns: {allowed (1/0), remaining, window_start_ms}
+//
+// cost=0 is a peek-only check: the current count is compared against the limit
+// but no entry is added to the sorted set. This avoids phantom entries that
+// would inflate ZCARD and reduce effective capacity.
 var slidingWindowScript = redis.NewScript(`
 local key     = KEYS[1]
 local limit   = tonumber(ARGV[1])
@@ -30,10 +34,16 @@ redis.call('ZREMRANGEBYSCORE', key, 0, now - window)
 local current = redis.call('ZCARD', key)
 
 if current + cost <= limit then
-    -- Use a unique member: now + math.random to avoid collisions.
-    local member = tostring(now) .. ':' .. tostring(math.random(1, 1000000))
-    redis.call('ZADD', key, now, member)
-    redis.call('EXPIRE', key, math.ceil(window / 1000) + 1)
+    -- Only record an entry when cost > 0 (cost=0 is a peek-only check).
+    if cost > 0 then
+        -- Use a monotonically increasing sequence counter as member to guarantee
+        -- uniqueness even when multiple requests arrive within the same millisecond.
+        local seq = redis.call('INCR', key .. ':seq')
+        local member = tostring(now) .. ':' .. tostring(seq)
+        redis.call('ZADD', key, now, member)
+        redis.call('EXPIRE', key, math.ceil(window / 1000) + 1)
+        redis.call('EXPIRE', key .. ':seq', math.ceil(window / 1000) + 1)
+    end
     return {1, limit - current - cost, 0}
 else
     -- Return the score of the oldest entry so callers can compute Retry-After.
@@ -57,6 +67,7 @@ func NewRedisLimiter(client *redis.Client) *RedisLimiter {
 }
 
 // Allow checks and (if allowed) increments the sliding-window counter for key.
+// Passing cost=0 performs a read-only check without consuming any capacity.
 func (r *RedisLimiter) Allow(ctx context.Context, key string, limit, cost int, window time.Duration) (Result, error) {
 	nowMs := time.Now().UnixMilli()
 	windowMs := window.Milliseconds()

@@ -1,13 +1,16 @@
 package auth
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/llm-router/gateway/internal/gateway/types"
 	"github.com/llm-router/gateway/internal/telemetry"
 )
@@ -22,7 +25,7 @@ type VirtualKeyMiddleware struct {
 }
 
 type lastUsedUpdate struct {
-	keyHash string
+	id uuid.UUID
 }
 
 // NewVirtualKeyMiddleware creates the middleware and starts the async updater.
@@ -88,9 +91,9 @@ func (m *VirtualKeyMiddleware) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// 4. Async last_used_at update (non-blocking).
+		// 4. Async last_used_at update (non-blocking, deduplicated in updater).
 		select {
-		case m.lastUsedCh <- lastUsedUpdate{keyHash: keyHash}:
+		case m.lastUsedCh <- lastUsedUpdate{id: key.ID}:
 		default: // drop if channel is full — acceptable
 		}
 
@@ -101,11 +104,35 @@ func (m *VirtualKeyMiddleware) Middleware(next http.Handler) http.Handler {
 	})
 }
 
-// runLastUsedUpdater drains the channel and updates last_used_at in bulk.
-// Runs as a background goroutine.
+// runLastUsedUpdater drains the channel and updates last_used_at in the DB.
+// Deduplicates per key: each key is updated at most once per minute.
 func (m *VirtualKeyMiddleware) runLastUsedUpdater() {
+	// seen tracks the last time each key was written to the DB.
+	seen := make(map[uuid.UUID]time.Time)
+
 	for update := range m.lastUsedCh {
-		_ = update // TODO phase 1-07: batch DB writes
+		// Skip if this key was already updated within the last minute.
+		if last, ok := seen[update.id]; ok && time.Since(last) < time.Minute {
+			continue
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := m.store.UpdateLastUsed(ctx, update.id); err != nil {
+			m.logger.Warn("last_used_at update failed", "error", err, "key_id", update.id)
+		}
+		cancel()
+
+		seen[update.id] = time.Now()
+
+		// Evict stale entries to prevent unbounded map growth.
+		if len(seen) > 5000 {
+			cutoff := time.Now().Add(-2 * time.Minute)
+			for k, v := range seen {
+				if v.Before(cutoff) {
+					delete(seen, k)
+				}
+			}
+		}
 	}
 }
 

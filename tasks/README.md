@@ -56,6 +56,8 @@ tasks/
 
 **Phase 2 완료 기준**: Provider 장애 시 자동 폴백, 팀별 예산·사용량 관리 가능, 운영 대시보드 운용
 
+**Phase 2 버그 수정** (완료): Budget DB 동기화, TPM 미들웨어, BudgetCache TTL, Budget 쿼리 캐싱, RoutingStore→FallbackRouter 연결, lastUsedUpdater, Lua 멤버 충돌, Admin UI 로그인/httpOnly 쿠키
+
 ---
 
 ## Phase 3 — 엔터프라이즈

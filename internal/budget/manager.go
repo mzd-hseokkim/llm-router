@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -55,11 +56,19 @@ type Cache interface {
 	DeleteSpend(ctx context.Context, entityType string, entityID uuid.UUID, period string) error
 }
 
+const listCacheTTL = 60 * time.Second
+
+type cachedBudgetList struct {
+	data      []*Budget
+	expiresAt time.Time
+}
+
 // Manager checks and records budget spend for LLM requests.
 type Manager struct {
-	store  Store
-	cache  Cache
-	logger *slog.Logger
+	store     Store
+	cache     Cache
+	logger    *slog.Logger
+	listCache sync.Map // key: "entityType:entityID" → cachedBudgetList
 }
 
 // NewManager creates a Manager.
@@ -67,11 +76,37 @@ func NewManager(store Store, cache Cache, logger *slog.Logger) *Manager {
 	return &Manager{store: store, cache: cache, logger: logger}
 }
 
+// cachedList returns budgets from in-memory cache, falling back to store.
+// The list is cached for 60 seconds to reduce DB load.
+func (m *Manager) cachedList(ctx context.Context, entityType string, entityID uuid.UUID) ([]*Budget, error) {
+	key := entityType + ":" + entityID.String()
+	if v, ok := m.listCache.Load(key); ok {
+		if c := v.(cachedBudgetList); time.Now().Before(c.expiresAt) {
+			return c.data, nil
+		}
+	}
+	budgets, err := m.store.List(ctx, entityType, entityID)
+	if err != nil {
+		return nil, err
+	}
+	m.listCache.Store(key, cachedBudgetList{
+		data:      budgets,
+		expiresAt: time.Now().Add(listCacheTTL),
+	})
+	return budgets, nil
+}
+
+// InvalidateListCache evicts the in-memory budget list for an entity.
+// Call this after creating or resetting a budget.
+func (m *Manager) InvalidateListCache(entityType string, entityID uuid.UUID) {
+	m.listCache.Delete(entityType + ":" + entityID.String())
+}
+
 // CheckBudget verifies that the entity has not exceeded its hard budget for the
 // active period. Returns ErrBudgetExceeded if the limit is reached, nil if
 // no budget is configured (= unlimited) or the budget has headroom.
 func (m *Manager) CheckBudget(ctx context.Context, entityType string, entityID uuid.UUID) error {
-	budgets, err := m.store.List(ctx, entityType, entityID)
+	budgets, err := m.cachedList(ctx, entityType, entityID)
 	if err != nil {
 		// On store error, allow the request (fail open).
 		m.logger.Warn("budget store list error; allowing request", "error", err,
@@ -110,7 +145,7 @@ func (m *Manager) RecordSpend(ctx context.Context, entityType string, entityID u
 	if costUSD == 0 {
 		return
 	}
-	budgets, err := m.store.List(ctx, entityType, entityID)
+	budgets, err := m.cachedList(ctx, entityType, entityID)
 	if err != nil {
 		m.logger.Error("budget record spend: list error", "error", err)
 		return
@@ -119,7 +154,9 @@ func (m *Manager) RecordSpend(ctx context.Context, entityType string, entityID u
 		if _, err := m.cache.IncrSpend(ctx, entityType, entityID, b.Period, costUSD); err != nil {
 			m.logger.Error("budget cache incr error", "error", err, "period", b.Period)
 		}
-		// DB is synced by the background scheduler.
+		if err := m.store.AddSpend(ctx, entityType, entityID, b.Period, costUSD); err != nil {
+			m.logger.Error("budget DB add spend error", "error", err, "period", b.Period)
+		}
 	}
 }
 
@@ -139,12 +176,9 @@ func (m *Manager) currentSpend(ctx context.Context, b *Budget) (float64, error) 
 	return b.CurrentSpend, nil
 }
 
-// SyncDB flushes Redis spend counters back to the DB. Called by the scheduler.
-func (m *Manager) SyncDB(ctx context.Context) {
-	// List all active budgets and sync cache → DB.
-	// For Phase 2, each IncrSpend call also calls store.AddSpend (see redis_cache).
-	// This method is a no-op placeholder for a future batched sync.
-}
+// SyncDB is a hook called by the scheduler; DB writes now happen inline in
+// RecordSpend, so this is intentionally empty.
+func (m *Manager) SyncDB(_ context.Context) {}
 
 // IsBudgetExceeded returns true if err is an ErrBudgetExceeded.
 func IsBudgetExceeded(err error) (ErrBudgetExceeded, bool) {

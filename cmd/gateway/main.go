@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -35,7 +36,6 @@ import (
 	pgstore "github.com/llm-router/gateway/internal/store/postgres"
 	redistore "github.com/llm-router/gateway/internal/store/redis"
 	"github.com/llm-router/gateway/internal/telemetry"
-	"time"
 )
 
 const version = "1.0.0"
@@ -93,9 +93,6 @@ func main() {
 	// --- Fallback Router ---
 	fr := fallback.NewRouter(registry, cb, logger)
 
-	// Build named fallback chains from config.
-	chains := buildFallbackChains(cfg)
-
 	// --- Request logging ---
 	logStore := pgstore.NewLogStore(pool)
 	logWriter := telemetry.NewLogWriter(logStore, logger)
@@ -129,13 +126,23 @@ func main() {
 	checker := health.NewChecker(pool, redisClient, version)
 	healthHandler := handler.NewHealthHandler(checker, tracker, registry)
 
+	// --- Routing store (hot-reload) ---
+	routingStore := handler.NewRoutingStore(cfg.Routing)
+
 	// --- HTTP server ---
 	srv := server.New(cfg.Server, logger)
 	r := srv.Router()
 
 	// /v1 routes — protected by virtual key auth
-	router.Setup(r, registry, fr, chains, logger, authMw.Middleware, logWriter, tracker,
-		rateLimiter, budgetMgr, costCalc)
+	chatHandler := router.Setup(r, registry, fr, buildFallbackChains(cfg.Routing), logger,
+		authMw.Middleware, logWriter, tracker, rateLimiter, budgetMgr, costCalc)
+
+	// Subscribe chat handler to routing config changes so that PUT /admin/routing
+	// immediately updates the active fallback chains.
+	routingStore.Subscribe(func(newCfg config.RoutingConfig) {
+		chatHandler.SetChains(buildFallbackChains(newCfg))
+		logger.Info("fallback chains reloaded from routing store")
+	})
 
 	// /ping — unauthenticated liveness stub (kept for backwards compatibility)
 	r.Get("/ping", internalhandler.Ping())
@@ -151,7 +158,7 @@ func main() {
 
 	// /admin/* — protected by master key
 	registerAdminRoutes(r, keyStore, keyCache, km, cipher, pool, logStore, cb, cfg, logger,
-		rateLimiter, budgetMgr, budgetStore)
+		rateLimiter, budgetMgr, budgetStore, routingStore)
 
 	if err := srv.ListenAndServe(context.Background()); err != nil {
 		logger.Error("server exited with error", "error", err)
@@ -206,9 +213,9 @@ func buildRegistry(km *provider.KeyManager, cfg *config.Config) *provider.Regist
 }
 
 // buildFallbackChains converts routing config to fallback.Chain objects.
-func buildFallbackChains(cfg *config.Config) []fallback.Chain {
-	chains := make([]fallback.Chain, 0, len(cfg.Routing.FallbackChains))
-	for _, fc := range cfg.Routing.FallbackChains {
+func buildFallbackChains(rc config.RoutingConfig) []fallback.Chain {
+	chains := make([]fallback.Chain, 0, len(rc.FallbackChains))
+	for _, fc := range rc.FallbackChains {
 		targets := make([]fallback.Target, 0, len(fc.Targets))
 		for _, t := range fc.Targets {
 			targets = append(targets, fallback.Target{
@@ -275,6 +282,7 @@ func registerAdminRoutes(
 	rateLimiter *ratelimit.RedisLimiter,
 	budgetMgr *budget.Manager,
 	budgetStore *pgstore.BudgetStore,
+	routingStore *handler.RoutingStore,
 ) {
 	adminMw := auth.AdminAuth(cfg.Gateway.MasterKey)
 
@@ -345,8 +353,7 @@ func registerAdminRoutes(
 		r.Get("/admin/users/{id}", orgsHandler.GetUser)
 		r.Put("/admin/users/{id}", orgsHandler.UpdateUser)
 
-		// Routing config (hot reload)
-		routingStore := handler.NewRoutingStore(cfg.Routing)
+		// Routing config (hot reload) — routingStore is shared with main() subscribers
 		routingHandler := handler.NewAdminRoutingHandler(routingStore)
 		r.Get("/admin/routing", routingHandler.Get)
 		r.Put("/admin/routing", routingHandler.Update)

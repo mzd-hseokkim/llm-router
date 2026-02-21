@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { clsx } from "clsx";
 
 const nav = [
@@ -14,6 +14,12 @@ const nav = [
 
 export default function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+  }
 
   return (
     <aside className="w-56 min-h-screen bg-slate-900 text-slate-100 flex flex-col">
@@ -37,8 +43,14 @@ export default function Sidebar() {
           </Link>
         ))}
       </nav>
-      <div className="px-4 py-3 border-t border-slate-700 text-xs text-slate-500">
-        v1.0.0
+      <div className="px-4 py-3 border-t border-slate-700 flex items-center justify-between">
+        <span className="text-xs text-slate-500">v1.0.0</span>
+        <button
+          onClick={handleLogout}
+          className="text-xs text-slate-400 hover:text-slate-100 transition-colors"
+        >
+          Sign out
+        </button>
       </div>
     </aside>
   );

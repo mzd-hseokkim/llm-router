@@ -1,10 +1,12 @@
 package middleware
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/llm-router/gateway/internal/auth"
 	"github.com/llm-router/gateway/internal/budget"
@@ -50,14 +52,23 @@ func BudgetCheck(mgr *budget.Manager, calc *cost.Calculator, logger *slog.Logger
 			// Store cost in log context so the logger can pick it up.
 			lc.CostUSD = costUSD
 
+			// Capture IDs before the goroutine to avoid data races on key fields.
+			keyID := key.ID
+			teamID := key.TeamID
+			orgID := key.OrgID
+
 			// Record spend asynchronously (best-effort).
+			// Use a detached context so that HTTP request cancellation does not
+			// abort the DB write that is happening after the response is sent.
 			go func() {
-				mgr.RecordSpend(r.Context(), "key", key.ID, costUSD)
-				if key.TeamID != nil {
-					mgr.RecordSpend(r.Context(), "team", *key.TeamID, costUSD)
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				mgr.RecordSpend(ctx, "key", keyID, costUSD)
+				if teamID != nil {
+					mgr.RecordSpend(ctx, "team", *teamID, costUSD)
 				}
-				if key.OrgID != nil {
-					mgr.RecordSpend(r.Context(), "org", *key.OrgID, costUSD)
+				if orgID != nil {
+					mgr.RecordSpend(ctx, "org", *orgID, costUSD)
 				}
 			}()
 		})
@@ -74,9 +85,9 @@ func writeBudgetError(w http.ResponseWriter, exc budget.ErrBudgetExceeded) {
 			"type": "budget_exceeded_error",
 			"code": "budget_exceeded",
 			"param": map[string]interface{}{
-				"limit_usd":        exc.Limit,
+				"limit_usd":         exc.Limit,
 				"current_spend_usd": exc.Current,
-				"period":           exc.Period,
+				"period":            exc.Period,
 			},
 		},
 	})
