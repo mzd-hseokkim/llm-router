@@ -37,6 +37,7 @@ import (
 	"github.com/llm-router/gateway/internal/guardrail/content"
 	"github.com/llm-router/gateway/internal/guardrail/injection"
 	"github.com/llm-router/gateway/internal/guardrail/keyword"
+	"github.com/llm-router/gateway/internal/guardrail/llmjudge"
 	"github.com/llm-router/gateway/internal/guardrail/pii"
 	"github.com/llm-router/gateway/internal/billing"
 	"github.com/llm-router/gateway/internal/prompt"
@@ -711,6 +712,22 @@ func buildGuardrailPipeline(cfg *config.Config, logger *slog.Logger) *guardrail.
 
 	var inputGuards, outputGuards []guardrail.Guardrail
 
+	// Build LLM judge once if any guardrail needs it.
+	var judge *llmjudge.Judge
+	needsLLM := (gc.PromptInjection.Enabled && gc.PromptInjection.Engine == "llm") ||
+		(gc.ContentFilter.Enabled && gc.ContentFilter.Engine == "llm")
+	if needsLLM {
+		apiKey := gc.LLMJudge.APIKey
+		if apiKey == "" {
+			apiKey = cfg.Providers.Anthropic.APIKey
+		}
+		if apiKey == "" {
+			logger.Warn("llm judge requested but no Anthropic API key configured; falling back to regex")
+		} else {
+			judge = llmjudge.New(apiKey, gc.LLMJudge.Model, logger)
+		}
+	}
+
 	// PII: applied to both input and output
 	if gc.PII.Enabled {
 		action := guardrail.Action(gc.PII.Action)
@@ -721,15 +738,26 @@ func buildGuardrailPipeline(cfg *config.Config, logger *slog.Logger) *guardrail.
 
 	// Prompt injection: input only
 	if gc.PromptInjection.Enabled {
-		d := injection.NewDetector(true, guardrail.Action(gc.PromptInjection.Action))
-		inputGuards = append(inputGuards, d)
+		action := guardrail.Action(gc.PromptInjection.Action)
+		if gc.PromptInjection.Engine == "llm" && judge != nil {
+			inputGuards = append(inputGuards, llmjudge.NewPromptInjectionGuard(judge, action))
+		} else {
+			inputGuards = append(inputGuards, injection.NewDetector(true, action))
+		}
 	}
 
 	// Content filter: both directions
 	if gc.ContentFilter.Enabled {
-		f := content.NewFilter(true, guardrail.Action(gc.ContentFilter.Action), gc.ContentFilter.Categories)
-		inputGuards = append(inputGuards, f)
-		outputGuards = append(outputGuards, f)
+		action := guardrail.Action(gc.ContentFilter.Action)
+		if gc.ContentFilter.Engine == "llm" && judge != nil {
+			g := llmjudge.NewContentFilterGuard(judge, action)
+			inputGuards = append(inputGuards, g)
+			outputGuards = append(outputGuards, g)
+		} else {
+			f := content.NewFilter(true, action, gc.ContentFilter.Categories)
+			inputGuards = append(inputGuards, f)
+			outputGuards = append(outputGuards, f)
+		}
 	}
 
 	// Custom keywords: both directions

@@ -279,10 +279,20 @@ func Load(configPath string) (*Config, error) {
 
 // GuardrailConfig holds guardrail policy configuration.
 type GuardrailConfig struct {
+	LLMJudge        LLMJudgeConfig                  `koanf:"llm_judge"`
 	PII              PIIGuardrailConfig              `koanf:"pii"`
 	PromptInjection  PromptInjectionGuardrailConfig  `koanf:"prompt_injection"`
 	ContentFilter    ContentFilterGuardrailConfig    `koanf:"content_filter"`
 	CustomKeywords   CustomKeywordsGuardrailConfig   `koanf:"custom_keywords"`
+}
+
+// LLMJudgeConfig configures the LLM used for AI-based guardrail decisions.
+type LLMJudgeConfig struct {
+	// Model is the Anthropic model ID to use for safety classification.
+	Model string `koanf:"model"`
+	// APIKey overrides providers.anthropic.api_key for the safety LLM.
+	// Leave empty to reuse the configured Anthropic provider key.
+	APIKey string `koanf:"api_key"`
 }
 
 type PIIGuardrailConfig struct {
@@ -294,12 +304,14 @@ type PIIGuardrailConfig struct {
 type PromptInjectionGuardrailConfig struct {
 	Enabled bool   `koanf:"enabled"`
 	Action  string `koanf:"action"` // block
+	Engine  string `koanf:"engine"` // regex | llm (default: regex)
 }
 
 type ContentFilterGuardrailConfig struct {
 	Enabled    bool     `koanf:"enabled"`
 	Action     string   `koanf:"action"`
-	Categories []string `koanf:"categories"` // hate, violence, sexual
+	Engine     string   `koanf:"engine"`     // regex | llm (default: regex)
+	Categories []string `koanf:"categories"` // hate, violence, sexual (regex engine only)
 }
 
 type CustomKeywordsGuardrailConfig struct {
