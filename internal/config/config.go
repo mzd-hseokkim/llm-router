@@ -288,11 +288,10 @@ type GuardrailConfig struct {
 
 // LLMJudgeConfig configures the LLM used for AI-based guardrail decisions.
 type LLMJudgeConfig struct {
-	// Model is the Anthropic model ID to use for safety classification.
+	// Provider is the registered provider name to use (e.g. "anthropic", "openai").
+	Provider string `koanf:"provider"`
+	// Model is the model ID within that provider.
 	Model string `koanf:"model"`
-	// APIKey overrides providers.anthropic.api_key for the safety LLM.
-	// Leave empty to reuse the configured Anthropic provider key.
-	APIKey string `koanf:"api_key"`
 }
 
 type PIIGuardrailConfig struct {

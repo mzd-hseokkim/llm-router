@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -169,7 +170,7 @@ func main() {
 	// --- Guardrails ---
 	guardrailPolicyStore := pgstore.NewGuardrailPolicyStore(pool)
 	guardrailMgr := guardrail.NewManager(logger)
-	initGuardrails(context.Background(), guardrailPolicyStore, guardrailMgr, cfg, logger)
+	initGuardrails(context.Background(), guardrailPolicyStore, guardrailMgr, cfg, registry, logger)
 
 	// --- Exact-match cache (temperature=0 only) ---
 	var cacheMw *middleware.CacheMiddleware
@@ -471,8 +472,8 @@ func registerAdminRoutes(
 		r.Post("/admin/keys/{id}/regenerate", vkHandler.Regenerate)
 
 		// Provider key CRUD (only available when encryption is configured)
+		pkStore := pgstore.NewProviderKeyStore(pool)
 		if cipher != nil {
-			pkStore := pgstore.NewProviderKeyStore(pool)
 			pkHandler := handler.NewAdminProviderKeysHandler(pkStore, km, cipher, logger)
 			r.Post("/admin/provider-keys", pkHandler.Create)
 			r.Get("/admin/provider-keys", pkHandler.List)
@@ -618,7 +619,7 @@ func registerAdminRoutes(
 		// Provider and model management
 		provStore := pgstore.NewProviderStore(pool)
 		modelStore := pgstore.NewModelStore(pool)
-		providersHandler := handler.NewAdminProvidersHandler(provStore, modelStore, registry, costCalc, logger)
+		providersHandler := handler.NewAdminProvidersHandler(provStore, modelStore, registry, costCalc, cipher, km, pool, logger)
 		r.Get("/admin/providers", providersHandler.ListProviders)
 		r.Post("/admin/providers", providersHandler.CreateProvider)
 		r.Get("/admin/providers/{id}", providersHandler.GetProvider)
@@ -633,7 +634,7 @@ func registerAdminRoutes(
 		guardrailsHandler := handler.NewAdminGuardrailsHandler(
 			guardrailPolicyStore, guardrailMgr, logger,
 			func(recs []*guardrail.PolicyRecord) *guardrail.Pipeline {
-				return buildPipelineFromRecords(recs, cfg, logger)
+				return buildPipelineFromRecords(recs, cfg, registry, logger)
 			},
 		)
 		r.Get("/admin/guardrails", guardrailsHandler.List)
@@ -730,12 +731,13 @@ func initGuardrails(
 	store guardrail.PolicyStore,
 	mgr *guardrail.Manager,
 	cfg *config.Config,
+	registry *provider.Registry,
 	logger *slog.Logger,
 ) {
 	recs, err := store.List(ctx)
 	if err != nil {
 		logger.Warn("guardrails: failed to load policies from DB; using config", "error", err)
-		mgr.SetPipeline(buildPipelineFromConfig(cfg, logger))
+		mgr.SetPipeline(buildPipelineFromConfig(cfg, registry, logger))
 		return
 	}
 
@@ -744,49 +746,76 @@ func initGuardrails(
 		seedRecs := guardrail.ConfigToRecords(cfg.Guardrails)
 		if err := store.UpsertAll(ctx, seedRecs); err != nil {
 			logger.Warn("guardrails: failed to seed DB; using config pipeline", "error", err)
-			mgr.SetPipeline(buildPipelineFromConfig(cfg, logger))
+			mgr.SetPipeline(buildPipelineFromConfig(cfg, registry, logger))
 			return
 		}
 		logger.Info("guardrails: seeded policies from config", "count", len(seedRecs))
 		recs = seedRecs
 	}
 
-	mgr.SetPipeline(buildPipelineFromRecords(recs, cfg, logger))
+	mgr.SetPipeline(buildPipelineFromRecords(recs, cfg, registry, logger))
+}
+
+// providerCompleter adapts provider.Provider to the llmjudge.ChatCompleter interface.
+type providerCompleter struct {
+	p provider.Provider
+}
+
+func (c *providerCompleter) Complete(ctx context.Context, system, userMsg, model string) (string, error) {
+	maxTokens := 64
+	req := &types.ChatCompletionRequest{
+		Model: model,
+		Messages: []types.Message{
+			{Role: "system", Content: system},
+			{Role: "user", Content: userMsg},
+		},
+		MaxTokens: &maxTokens,
+	}
+	resp, err := c.p.ChatCompletion(ctx, model, req, nil)
+	if err != nil {
+		return "", err
+	}
+	if len(resp.Choices) == 0 {
+		return "", fmt.Errorf("llm judge: empty response from provider")
+	}
+	return resp.Choices[0].Message.Content, nil
 }
 
 // buildPipelineFromRecords constructs a Pipeline from PolicyRecord objects.
 // Returns nil if no records are enabled.
-func buildPipelineFromRecords(recs []*guardrail.PolicyRecord, cfg *config.Config, logger *slog.Logger) *guardrail.Pipeline {
+func buildPipelineFromRecords(recs []*guardrail.PolicyRecord, cfg *config.Config, registry *provider.Registry, logger *slog.Logger) *guardrail.Pipeline {
 	var inputGuards, outputGuards []guardrail.Guardrail
 
-	// Resolve the Anthropic API key for LLM-based guardrails.
-	anthropicKey := cfg.Providers.Anthropic.APIKey
-
-	// Pre-build LLM judge if any record requests it.
+	// Pre-build LLM judge if any enabled record requests engine=llm.
 	var judge *llmjudge.Judge
 	for _, rec := range recs {
 		if !rec.IsEnabled {
 			continue
 		}
 		if rec.Engine == "llm" {
-			if anthropicKey == "" {
-				logger.Warn("llm judge requested but no Anthropic API key configured; falling back to regex")
-			} else {
-				// Read model from llm_judge record if present.
-				model := ""
-				for _, r := range recs {
-					if r.GuardrailType == "llm_judge" {
-						var cfg map[string]any
-						if len(r.ConfigJSON) > 0 {
-							_ = json.Unmarshal(r.ConfigJSON, &cfg)
-							if m, ok := cfg["model"].(string); ok {
-								model = m
-							}
+			// Read provider + model from the llm_judge config record.
+			var providerName, model string
+			for _, r := range recs {
+				if r.GuardrailType == "llm_judge" {
+					var jcfg map[string]any
+					if len(r.ConfigJSON) > 0 {
+						_ = json.Unmarshal(r.ConfigJSON, &jcfg)
+						if p, ok := jcfg["provider"].(string); ok {
+							providerName = p
 						}
-						break
+						if m, ok := jcfg["model"].(string); ok {
+							model = m
+						}
 					}
+					break
 				}
-				judge = llmjudge.New(anthropicKey, model, logger)
+			}
+			if providerName == "" || model == "" {
+				logger.Warn("llm judge requested but provider/model not configured in llm_judge record; falling back to regex")
+			} else if p, ok := registry.Get(providerName); !ok {
+				logger.Warn("llm judge: provider not registered, falling back to regex", "provider", providerName)
+			} else {
+				judge = llmjudge.New(&providerCompleter{p: p}, model, logger)
 			}
 			break
 		}
@@ -857,7 +886,7 @@ func buildPipelineFromRecords(recs []*guardrail.PolicyRecord, cfg *config.Config
 }
 
 // buildPipelineFromConfig constructs a Pipeline directly from config (used as fallback).
-func buildPipelineFromConfig(cfg *config.Config, logger *slog.Logger) *guardrail.Pipeline {
+func buildPipelineFromConfig(cfg *config.Config, registry *provider.Registry, logger *slog.Logger) *guardrail.Pipeline {
 	gc := cfg.Guardrails
 
 	var inputGuards, outputGuards []guardrail.Guardrail
@@ -867,14 +896,14 @@ func buildPipelineFromConfig(cfg *config.Config, logger *slog.Logger) *guardrail
 	needsLLM := (gc.PromptInjection.Enabled && gc.PromptInjection.Engine == "llm") ||
 		(gc.ContentFilter.Enabled && gc.ContentFilter.Engine == "llm")
 	if needsLLM {
-		apiKey := gc.LLMJudge.APIKey
-		if apiKey == "" {
-			apiKey = cfg.Providers.Anthropic.APIKey
-		}
-		if apiKey == "" {
-			logger.Warn("llm judge requested but no Anthropic API key configured; falling back to regex")
+		providerName := gc.LLMJudge.Provider
+		model := gc.LLMJudge.Model
+		if providerName == "" || model == "" {
+			logger.Warn("llm judge requested but provider/model not configured; falling back to regex")
+		} else if p, ok := registry.Get(providerName); !ok {
+			logger.Warn("llm judge: provider not registered, falling back to regex", "provider", providerName)
 		} else {
-			judge = llmjudge.New(apiKey, gc.LLMJudge.Model, logger)
+			judge = llmjudge.New(&providerCompleter{p: p}, model, logger)
 		}
 	}
 

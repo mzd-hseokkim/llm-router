@@ -1,58 +1,29 @@
 package llmjudge
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
-	"time"
 
 	"github.com/llm-router/gateway/internal/guardrail"
 )
 
-const (
-	anthropicAPI     = "https://api.anthropic.com/v1/messages"
-	anthropicVersion = "2023-06-01"
-	requestTimeout   = 10 * time.Second
-	maxTokens        = 64
-)
+// ChatCompleter is the minimal interface the Judge needs from any LLM provider.
+// provider.Provider satisfies this interface via an adapter in main.go.
+type ChatCompleter interface {
+	Complete(ctx context.Context, system, userMsg, model string) (string, error)
+}
 
-// Judge makes LLM-based safety decisions via Anthropic Messages API.
+// Judge makes LLM-based safety decisions via any registered provider.
 type Judge struct {
-	apiKey string
-	model  string
-	client *http.Client
-	logger *slog.Logger
+	completer ChatCompleter
+	model     string
+	logger    *slog.Logger
 }
 
-func New(apiKey, model string, logger *slog.Logger) *Judge {
-	return &Judge{
-		apiKey: apiKey,
-		model:  model,
-		client: &http.Client{Timeout: requestTimeout},
-		logger: logger,
-	}
-}
-
-type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system"`
-	Messages  []anthropicMessage `json:"messages"`
-}
-
-type anthropicMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type anthropicResponse struct {
-	Content []struct {
-		Text string `json:"text"`
-	} `json:"content"`
+func New(completer ChatCompleter, model string, logger *slog.Logger) *Judge {
+	return &Judge{completer: completer, model: model, logger: logger}
 }
 
 type safetyResult struct {
@@ -62,48 +33,16 @@ type safetyResult struct {
 }
 
 func (j *Judge) classify(ctx context.Context, systemPrompt, text string) (*safetyResult, error) {
-	body, err := json.Marshal(anthropicRequest{
-		Model:     j.model,
-		MaxTokens: maxTokens,
-		System:    systemPrompt,
-		Messages:  []anthropicMessage{{Role: "user", Content: text}},
-	})
+	raw, err := j.completer.Complete(ctx, systemPrompt, text, j.model)
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, anthropicAPI, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", j.apiKey)
-	req.Header.Set("anthropic-version", anthropicVersion)
-
-	resp, err := j.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("call anthropic: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("anthropic returned %d: %s", resp.StatusCode, b)
-	}
-
-	var ar anthropicResponse
-	if err := json.NewDecoder(resp.Body).Decode(&ar); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-	if len(ar.Content) == 0 {
-		return nil, fmt.Errorf("empty response from anthropic")
+		return nil, fmt.Errorf("llm judge: %w", err)
 	}
 
 	var result safetyResult
-	if err := json.Unmarshal([]byte(ar.Content[0].Text), &result); err != nil {
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		// If JSON parsing fails, treat as safe to avoid over-blocking
 		j.logger.Warn("llm judge: failed to parse safety result, treating as safe",
-			"raw", ar.Content[0].Text, "error", err)
+			"raw", raw, "error", err)
 		return &safetyResult{Safe: true}, nil
 	}
 	return &result, nil

@@ -65,8 +65,8 @@ func ConfigToRecords(gc config.GuardrailConfig) []*PolicyRecord {
 		SortOrder:     3,
 	})
 
-	// llm_judge — not a standalone guardrail; stores model preference
-	ljJSON, _ := json.Marshal(map[string]any{"model": gc.LLMJudge.Model})
+	// llm_judge — not a standalone guardrail; stores provider + model preference
+	ljJSON, _ := json.Marshal(map[string]any{"provider": gc.LLMJudge.Provider, "model": gc.LLMJudge.Model})
 	recs = append(recs, &PolicyRecord{
 		GuardrailType: "llm_judge",
 		IsEnabled:     false,

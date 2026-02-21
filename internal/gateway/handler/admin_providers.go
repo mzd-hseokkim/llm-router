@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -9,7 +10,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/llm-router/gateway/internal/cost"
+	"github.com/llm-router/gateway/internal/crypto"
 	"github.com/llm-router/gateway/internal/gateway/types"
 	"github.com/llm-router/gateway/internal/provider"
 	pgstore "github.com/llm-router/gateway/internal/store/postgres"
@@ -21,6 +25,9 @@ type AdminProvidersHandler struct {
 	modelStore    provider.ModelStore
 	registry      *provider.Registry
 	costCalc      *cost.Calculator
+	cipher        *crypto.Cipher
+	km            *provider.KeyManager
+	pool          *pgxpool.Pool
 	logger        *slog.Logger
 }
 
@@ -30,6 +37,9 @@ func NewAdminProvidersHandler(
 	modelStore provider.ModelStore,
 	registry *provider.Registry,
 	costCalc *cost.Calculator,
+	cipher *crypto.Cipher,
+	km *provider.KeyManager,
+	pool *pgxpool.Pool,
 	logger *slog.Logger,
 ) *AdminProvidersHandler {
 	return &AdminProvidersHandler{
@@ -37,6 +47,9 @@ func NewAdminProvidersHandler(
 		modelStore:    modelStore,
 		registry:      registry,
 		costCalc:      costCalc,
+		cipher:        cipher,
+		km:            km,
+		pool:          pool,
 		logger:        logger,
 	}
 }
@@ -51,6 +64,7 @@ type createProviderRequest struct {
 	IsEnabled   *bool           `json:"is_enabled,omitempty"`
 	ConfigJSON  json.RawMessage `json:"config_json,omitempty"`
 	SortOrder   int             `json:"sort_order"`
+	APIKey      string          `json:"api_key,omitempty"` // optional: creates a default key atomically
 }
 
 type updateProviderRequest struct {
@@ -148,6 +162,7 @@ func (h *AdminProvidersHandler) ListProviders(w http.ResponseWriter, r *http.Req
 }
 
 // CreateProvider handles POST /admin/providers.
+// If api_key is provided, the provider and its default key are inserted atomically.
 func (h *AdminProvidersHandler) CreateProvider(w http.ResponseWriter, r *http.Request) {
 	var req createProviderRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -174,12 +189,85 @@ func (h *AdminProvidersHandler) CreateProvider(w http.ResponseWriter, r *http.Re
 		SortOrder:   req.SortOrder,
 	}
 
-	if err := h.providerStore.Create(r.Context(), rec); err != nil {
-		h.logger.Error("failed to create provider", "error", err)
+	// No API key: simple single-table insert.
+	if req.APIKey == "" {
+		if err := h.providerStore.Create(r.Context(), rec); err != nil {
+			h.logger.Error("failed to create provider", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to create provider", "internal_error", "")
+			return
+		}
+		writeJSON(w, http.StatusCreated, toProviderResponse(rec))
+		return
+	}
+
+	// API key provided: encrypt then insert both records in one transaction.
+	if h.cipher == nil {
+		writeError(w, http.StatusBadRequest, "encryption not configured; cannot store API key", "invalid_request_error", "")
+		return
+	}
+
+	encryptedKey, err := h.cipher.Encrypt([]byte(req.APIKey))
+	if err != nil {
+		h.logger.Error("failed to encrypt provider key", "error", err)
+		writeError(w, http.StatusInternalServerError, "encryption failed", "internal_error", "")
+		return
+	}
+
+	tx, err := h.pool.Begin(r.Context())
+	if err != nil {
+		h.logger.Error("failed to begin transaction", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create provider", "internal_error", "")
+		return
+	}
+	defer tx.Rollback(context.Background()) //nolint:errcheck
+
+	const providerSQL = `
+		INSERT INTO providers (name, adapter_type, display_name, base_url, is_enabled, config_json, sort_order)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, created_at, updated_at`
+
+	var provID pgtype.UUID
+	var provCreatedAt, provUpdatedAt pgtype.Timestamptz
+	err = tx.QueryRow(r.Context(), providerSQL,
+		rec.Name, rec.AdapterType, rec.DisplayName,
+		nullableStrH(rec.BaseURL), rec.IsEnabled,
+		nullableBH(rec.ConfigJSON), rec.SortOrder,
+	).Scan(&provID, &provCreatedAt, &provUpdatedAt)
+	if err != nil {
+		h.logger.Error("failed to insert provider", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create provider", "internal_error", "")
+		return
+	}
+	rec.ID = uuid.UUID(provID.Bytes)
+	if provCreatedAt.Valid {
+		rec.CreatedAt = provCreatedAt.Time
+	}
+	if provUpdatedAt.Valid {
+		rec.UpdatedAt = provUpdatedAt.Time
+	}
+
+	const keySQL = `
+		INSERT INTO provider_keys (provider, key_alias, encrypted_key, key_preview, is_active, weight, monthly_budget_usd)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`
+
+	_, err = tx.Exec(r.Context(), keySQL,
+		req.Name, "default", encryptedKey, keyPreview(req.APIKey), true, 100, nil,
+	)
+	if err != nil {
+		h.logger.Error("failed to insert provider key", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create provider key", "internal_error", "")
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		h.logger.Error("failed to commit transaction", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to create provider", "internal_error", "")
 		return
 	}
 
+	if h.km != nil {
+		h.km.InvalidateCache(req.Name)
+	}
 	writeJSON(w, http.StatusCreated, toProviderResponse(rec))
 }
 
@@ -525,6 +613,22 @@ func toProviderResponse(rec *provider.ProviderRecord) providerResponse {
 		CreatedAt:   rec.CreatedAt,
 		UpdatedAt:   rec.UpdatedAt,
 	}
+}
+
+// nullableStrH returns nil for empty strings (for nullable DB columns).
+func nullableStrH(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// nullableBH returns nil for empty/nil byte slices (for nullable JSONB columns).
+func nullableBH(b []byte) any {
+	if len(b) == 0 {
+		return nil
+	}
+	return b
 }
 
 func toModelResponse(rec *provider.ModelRecord) modelResponse {

@@ -128,6 +128,7 @@ export interface CreateProviderPayload {
   is_enabled?: boolean;
   config_json?: Record<string, unknown>;
   sort_order?: number;
+  api_key?: string; // optional: creates default key atomically on the server
 }
 
 export interface UpdateProviderPayload {

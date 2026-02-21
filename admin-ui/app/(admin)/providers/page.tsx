@@ -92,10 +92,12 @@ function AddProviderDialog({
     base_url: "",
     is_enabled: true,
   });
+  const [apiKey, setApiKey] = useState("");
   const [error, setError] = useState("");
 
   const mutation = useMutation({
-    mutationFn: () => providers.create(form),
+    mutationFn: () =>
+      providers.create({ ...form, api_key: apiKey.trim() || undefined }),
     onSuccess: () => {
       onCreated();
       onClose();
@@ -167,6 +169,22 @@ function AddProviderDialog({
               value={form.base_url ?? ""}
               onChange={(e) => setForm({ ...form, base_url: e.target.value })}
             />
+          </label>
+
+          <label className="block">
+            <span className="text-xs font-medium text-slate-600">
+              API Key
+            </span>
+            <input
+              type="password"
+              className="mt-1 block w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono"
+              placeholder="sk-..."
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+            />
+            <p className="mt-1 text-xs text-slate-400">
+              Optional. Registers as the default key for this provider.
+            </p>
           </label>
 
           <label className="flex items-center gap-2 cursor-pointer">

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { guardrails, GuardrailPolicy, UpdateGuardrailPayload } from "@/lib/api";
+import { guardrails, providers, GuardrailPolicy, UpdateGuardrailPayload } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,12 +96,29 @@ function SectionCard({
 
 function LLMJudgeCard({ policy }: { policy: GuardrailPolicy }) {
   const qc = useQueryClient();
-  const cfg = policy.config_json as { model?: string };
-  const [model, setModel] = useState(cfg.model ?? "");
+  const cfg = policy.config_json as { provider?: string; model?: string };
+  const [selectedProvider, setSelectedProvider] = useState(cfg.provider ?? "");
+  const [selectedModel, setSelectedModel] = useState(cfg.model ?? "");
 
   useEffect(() => {
-    setModel((policy.config_json as { model?: string }).model ?? "");
+    const c = policy.config_json as { provider?: string; model?: string };
+    setSelectedProvider(c.provider ?? "");
+    setSelectedModel(c.model ?? "");
   }, [policy.config_json]);
+
+  const { data: providerList } = useQuery({
+    queryKey: ["providers"],
+    queryFn: providers.list,
+  });
+
+  const { data: modelList } = useQuery({
+    queryKey: ["provider-models", selectedProvider],
+    queryFn: () => {
+      const p = providerList?.find((p) => p.name === selectedProvider);
+      return p ? providers.models.list(p.id) : Promise.resolve([]);
+    },
+    enabled: !!selectedProvider && !!providerList,
+  });
 
   const mutation = useMutation({
     mutationFn: (payload: UpdateGuardrailPayload) =>
@@ -109,35 +126,63 @@ function LLMJudgeCard({ policy }: { policy: GuardrailPolicy }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["guardrails"] }),
   });
 
+  const enabledProviders = providerList?.filter((p) => p.is_enabled) ?? [];
+  const enabledModels = modelList?.filter((m) => m.is_enabled) ?? [];
+
   return (
     <SectionCard
       title="LLM Judge"
-      description="Uses Anthropic Claude to evaluate prompt safety and content policy. The API key is read from the server's ANTHROPIC_API_KEY configuration."
+      description='Uses a registered provider model to evaluate prompt safety and content policy. Applied when engine is set to "llm" on other guardrails.'
     >
       <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">
-            Model ID
-          </label>
-          <input
-            type="text"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            placeholder="claude-haiku-4-5-20251001"
-            className="w-full rounded border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-          />
-          <p className="mt-1 text-xs text-slate-400">
-            Used when engine is set to &quot;llm&quot; on other guardrails.
-          </p>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Provider
+            </label>
+            <select
+              value={selectedProvider}
+              onChange={(e) => {
+                setSelectedProvider(e.target.value);
+                setSelectedModel("");
+              }}
+              className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+            >
+              <option value="">— select provider —</option>
+              {enabledProviders.map((p) => (
+                <option key={p.id} value={p.name}>
+                  {p.display_name || p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Model
+            </label>
+            <select
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              disabled={!selectedProvider}
+              className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:bg-slate-50 disabled:text-slate-400"
+            >
+              <option value="">— select model —</option>
+              {enabledModels.map((m) => (
+                <option key={m.id} value={m.model_id}>
+                  {m.display_name || m.model_id}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         <div className="flex justify-end">
           <button
             onClick={() =>
               mutation.mutate({
-                config_json: { model },
+                config_json: { provider: selectedProvider, model: selectedModel },
               })
             }
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || !selectedProvider || !selectedModel}
             className="rounded bg-brand-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
           >
             {mutation.isPending ? "Saving…" : "Save"}
