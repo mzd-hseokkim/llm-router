@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -181,6 +182,30 @@ func (s *LogStore) upsertDailyUsage(ctx context.Context, entries []*telemetry.Lo
 		br.Exec() //nolint:errcheck — best-effort
 	}
 }
+
+// GetByRequestID returns a single log entry by its request_id string.
+func (s *LogStore) GetByRequestID(ctx context.Context, requestID string) (*telemetry.LogEntry, error) {
+	const q = `
+		SELECT
+			request_id, timestamp, model, provider,
+			virtual_key_id, user_id, team_id, org_id,
+			prompt_tokens, completion_tokens, total_tokens,
+			cost_usd, latency_ms, ttft_ms,
+			status_code, finish_reason, cache_hit, is_streaming,
+			error_code, error_message, metadata
+		FROM request_logs
+		WHERE request_id = $1`
+
+	row := s.pool.QueryRow(ctx, q, requestID)
+	e, err := scanLogEntry(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrLogNotFound
+	}
+	return e, err
+}
+
+// ErrLogNotFound is returned when a log entry is not found.
+var ErrLogNotFound = errors.New("log entry not found")
 
 // LogFilter specifies optional filter parameters for listing log entries.
 type LogFilter struct {

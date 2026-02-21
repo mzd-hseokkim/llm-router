@@ -2,10 +2,12 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/llm-router/gateway/internal/store/postgres"
 	"github.com/llm-router/gateway/internal/telemetry"
@@ -14,6 +16,7 @@ import (
 // logQuerier is the minimal interface needed by AdminLogsHandler.
 type logQuerier interface {
 	List(ctx context.Context, f postgres.LogFilter) ([]*telemetry.LogEntry, error)
+	GetByRequestID(ctx context.Context, requestID string) (*telemetry.LogEntry, error)
 }
 
 // AdminLogsHandler handles GET /admin/logs.
@@ -24,6 +27,27 @@ type AdminLogsHandler struct {
 // NewAdminLogsHandler returns an AdminLogsHandler backed by the given store.
 func NewAdminLogsHandler(store logQuerier) *AdminLogsHandler {
 	return &AdminLogsHandler{store: store}
+}
+
+// Get handles GET /admin/logs/{request_id}.
+func (h *AdminLogsHandler) Get(w http.ResponseWriter, r *http.Request) {
+	requestID := chi.URLParam(r, "request_id")
+	if requestID == "" {
+		writeError(w, http.StatusBadRequest, "request_id is required", "invalid_request_error", "")
+		return
+	}
+
+	entry, err := h.store.GetByRequestID(r.Context(), requestID)
+	if errors.Is(err, postgres.ErrLogNotFound) {
+		writeError(w, http.StatusNotFound, "log entry not found", "invalid_request_error", "not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get log entry", "api_error", "")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, entry)
 }
 
 // List handles GET /admin/logs with optional query parameters:

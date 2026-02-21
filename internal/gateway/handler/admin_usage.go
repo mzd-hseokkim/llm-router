@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -62,6 +63,33 @@ func (h *AdminUsageHandler) Summary(w http.ResponseWriter, r *http.Request) {
 		"total_cost_usd":    summary.TotalCostUSD,
 		"error_count":       summary.ErrorCount,
 		"by_model":          byModel,
+	})
+}
+
+// TopSpenders handles GET /admin/usage/top-spenders?limit=10&period=monthly
+func (h *AdminUsageHandler) TopSpenders(w http.ResponseWriter, r *http.Request) {
+	period := r.URL.Query().Get("period")
+	limitStr := r.URL.Query().Get("limit")
+
+	limit := 10
+	if limitStr != "" {
+		if n, err := strconv.Atoi(limitStr); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+
+	from, to := periodRange(period)
+	spenders, err := h.usage.TopSpenders(r.Context(), from, to, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"period": period,
+		"from":   from.Format(time.DateOnly),
+		"to":     to.Format(time.DateOnly),
+		"data":   spenders,
 	})
 }
 

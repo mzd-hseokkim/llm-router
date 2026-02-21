@@ -50,8 +50,8 @@ tasks/
 | 03 | ✅ [요청률 제한 (RPM/TPM)](phase2-stability/03-rate-limiting.md) | Token Bucket, 계층적 제한, Redis Lua |
 | 04 | ✅ [예산 관리](phase2-stability/04-budget-management.md) | Soft/Hard 예산, 기간별 자동 리셋 |
 | 05 | ✅ [비용 추적](phase2-stability/05-cost-tracking.md) | 토큰 카운팅, 모델별 단가 테이블, 일별 집계 |
-| 06 | [Admin API](phase2-stability/06-admin-api.md) | Key·Provider·모델·라우팅 CRUD, 핫 리로드 |
-| 07 | [Admin 대시보드 UI](phase2-stability/07-admin-dashboard.md) | Next.js, 실시간 메트릭, 로그 뷰어 |
+| 06 | ✅ [Admin API](phase2-stability/06-admin-api.md) | Key·Provider·모델·라우팅 CRUD, 핫 리로드 |
+| 07 | ✅ [Admin 대시보드 UI](phase2-stability/07-admin-dashboard.md) | Next.js, 실시간 메트릭, 로그 뷰어 |
 | 08 | ✅ [추가 Provider](phase2-stability/08-additional-providers.md) | Azure OpenAI, AWS Bedrock, Mistral, Cohere |
 
 **Phase 2 완료 기준**: Provider 장애 시 자동 폴백, 팀별 예산·사용량 관리 가능, 운영 대시보드 운용

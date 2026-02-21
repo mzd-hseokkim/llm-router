@@ -262,6 +262,52 @@ func (h *AdminKeysHandler) Deactivate(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// Regenerate handles POST /admin/keys/{id}/regenerate — rotates the raw key.
+func (h *AdminKeysHandler) Regenerate(w http.ResponseWriter, r *http.Request) {
+	id, ok := parseUUID(w, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+
+	key, err := h.store.GetByID(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, auth.ErrKeyNotFound) {
+			writeError(w, http.StatusNotFound, "key not found", "invalid_request_error", "not_found")
+			return
+		}
+		h.logger.Error("failed to get key for regeneration", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to get key", "internal_error", "")
+		return
+	}
+
+	oldHash := key.KeyHash
+	rawKey, keyHash, keyPrefix, err := auth.GenerateKey()
+	if err != nil {
+		h.logger.Error("failed to generate new key", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to generate key", "internal_error", "")
+		return
+	}
+
+	if err := h.store.UpdateHash(r.Context(), id, keyHash, keyPrefix); err != nil {
+		h.logger.Error("failed to update key hash", "id", id, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to regenerate key", "internal_error", "")
+		return
+	}
+
+	// Invalidate the old cache entry.
+	if cacheErr := h.cache.Delete(r.Context(), oldHash); cacheErr != nil {
+		h.logger.Warn("failed to invalidate old key cache", "error", cacheErr)
+	}
+
+	writeJSON(w, http.StatusOK, createKeyResponse{
+		ID:        key.ID,
+		Key:       rawKey,
+		KeyPrefix: keyPrefix,
+		Name:      key.Name,
+		CreatedAt: key.CreatedAt,
+	})
+}
+
 // --- helpers ---
 
 func toKeyResponse(k *auth.VirtualKey) keyResponse {

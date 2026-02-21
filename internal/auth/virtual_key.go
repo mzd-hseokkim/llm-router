@@ -57,6 +57,7 @@ type Store interface {
 	Update(ctx context.Context, key *VirtualKey) error
 	Deactivate(ctx context.Context, id uuid.UUID) error
 	UpdateLastUsed(ctx context.Context, id uuid.UUID) error
+	UpdateHash(ctx context.Context, id uuid.UUID, keyHash, keyPrefix string) error
 }
 
 // GenerateKey creates a new virtual key. Returns the raw key (shown once),

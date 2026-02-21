@@ -288,6 +288,7 @@ func registerAdminRoutes(
 		r.Get("/admin/keys/{id}", vkHandler.Get)
 		r.Patch("/admin/keys/{id}", vkHandler.Update)
 		r.Delete("/admin/keys/{id}", vkHandler.Deactivate)
+		r.Post("/admin/keys/{id}/regenerate", vkHandler.Regenerate)
 
 		// Provider key CRUD (only available when encryption is configured)
 		if cipher != nil {
@@ -304,6 +305,7 @@ func registerAdminRoutes(
 		// Request log query
 		logsHandler := handler.NewAdminLogsHandler(logStore)
 		r.Get("/admin/logs", logsHandler.List)
+		r.Get("/admin/logs/{request_id}", logsHandler.Get)
 
 		// Circuit breaker admin endpoints
 		cbHandler := handler.NewAdminCircuitBreakerHandler(cb, logger)
@@ -325,6 +327,34 @@ func registerAdminRoutes(
 		usageStore := pgstore.NewUsageStore(pool)
 		usageHandler := handler.NewAdminUsageHandler(usageStore)
 		r.Get("/admin/usage/summary", usageHandler.Summary)
+		r.Get("/admin/usage/top-spenders", usageHandler.TopSpenders)
+
+		// Organizations, Teams, Users
+		orgStore := pgstore.NewOrgStore(pool)
+		orgsHandler := handler.NewAdminOrgsHandler(orgStore)
+		r.Post("/admin/organizations", orgsHandler.CreateOrg)
+		r.Get("/admin/organizations", orgsHandler.ListOrgs)
+		r.Get("/admin/organizations/{id}", orgsHandler.GetOrg)
+		r.Put("/admin/organizations/{id}", orgsHandler.UpdateOrg)
+		r.Post("/admin/teams", orgsHandler.CreateTeam)
+		r.Get("/admin/teams", orgsHandler.ListTeams)
+		r.Get("/admin/teams/{id}", orgsHandler.GetTeam)
+		r.Put("/admin/teams/{id}", orgsHandler.UpdateTeam)
+		r.Post("/admin/users", orgsHandler.CreateUser)
+		r.Get("/admin/users", orgsHandler.ListUsers)
+		r.Get("/admin/users/{id}", orgsHandler.GetUser)
+		r.Put("/admin/users/{id}", orgsHandler.UpdateUser)
+
+		// Routing config (hot reload)
+		routingStore := handler.NewRoutingStore(cfg.Routing)
+		routingHandler := handler.NewAdminRoutingHandler(routingStore)
+		r.Get("/admin/routing", routingHandler.Get)
+		r.Put("/admin/routing", routingHandler.Update)
+		r.Post("/admin/routing/reload", routingHandler.Reload)
+
+		// OpenAPI spec
+		openAPIHandler := handler.NewAdminOpenAPIHandler()
+		r.Get("/admin/openapi.json", openAPIHandler.Spec)
 	})
 }
 

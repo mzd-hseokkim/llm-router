@@ -147,6 +147,45 @@ func (s *UsageStore) GetSummary(ctx context.Context, entityType string, entityID
 	return s2, nil
 }
 
+// TopSpender holds aggregated spend for a single virtual key.
+type TopSpender struct {
+	VirtualKeyID string  `json:"virtual_key_id"`
+	RequestCount int64   `json:"request_count"`
+	TotalTokens  int64   `json:"total_tokens"`
+	CostUSD      float64 `json:"cost_usd"`
+}
+
+// TopSpenders returns the top N virtual keys by cost over a date range.
+func (s *UsageStore) TopSpenders(ctx context.Context, from, to time.Time, limit int) ([]TopSpender, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 10
+	}
+	const q = `
+		SELECT virtual_key_id::text, SUM(request_count), SUM(total_tokens), SUM(cost_usd)
+		FROM daily_usage
+		WHERE date >= $1 AND date <= $2
+		  AND virtual_key_id != '00000000-0000-0000-0000-000000000000'
+		GROUP BY virtual_key_id
+		ORDER BY SUM(cost_usd) DESC
+		LIMIT $3`
+
+	rows, err := s.pool.Query(ctx, q, from, to, limit)
+	if err != nil {
+		return nil, fmt.Errorf("top spenders: %w", err)
+	}
+	defer rows.Close()
+
+	var out []TopSpender
+	for rows.Next() {
+		var ts TopSpender
+		if err := rows.Scan(&ts.VirtualKeyID, &ts.RequestCount, &ts.TotalTokens, &ts.CostUSD); err != nil {
+			return nil, err
+		}
+		out = append(out, ts)
+	}
+	return out, rows.Err()
+}
+
 // GetByModel returns per-model breakdown for an entity over a date range.
 func (s *UsageStore) GetByModel(ctx context.Context, entityType string, entityID uuid.UUID, from, to time.Time) ([]ModelBreakdown, error) {
 	var q string

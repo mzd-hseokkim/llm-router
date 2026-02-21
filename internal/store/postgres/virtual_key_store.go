@@ -172,6 +172,19 @@ func (s *VirtualKeyStore) UpdateLastUsed(ctx context.Context, id uuid.UUID) erro
 	return err
 }
 
+// UpdateHash rotates the key_hash and key_prefix for an existing virtual key.
+func (s *VirtualKeyStore) UpdateHash(ctx context.Context, id uuid.UUID, keyHash, keyPrefix string) error {
+	const q = `UPDATE virtual_keys SET key_hash = $1, key_prefix = $2, updated_at = NOW() WHERE id = $3`
+	tag, err := s.pool.Exec(ctx, q, keyHash, keyPrefix, id)
+	if err != nil {
+		return fmt.Errorf("update key hash: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return auth.ErrKeyNotFound
+	}
+	return nil
+}
+
 // --- helpers ---
 
 // scanner abstracts pgx.Row and pgx.Rows for the shared scan function.
