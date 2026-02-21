@@ -36,6 +36,7 @@ import (
 	"github.com/llm-router/gateway/internal/guardrail/injection"
 	"github.com/llm-router/gateway/internal/guardrail/keyword"
 	"github.com/llm-router/gateway/internal/guardrail/pii"
+	"github.com/llm-router/gateway/internal/billing"
 	"github.com/llm-router/gateway/internal/prompt"
 	"github.com/llm-router/gateway/internal/health"
 	internalhandler "github.com/llm-router/gateway/internal/handler"
@@ -197,9 +198,23 @@ func main() {
 	promptStore := pgstore.NewPromptStore(pool)
 	promptSvc := prompt.NewService(promptStore)
 
+	// --- A/B testing ---
+	abTestStore := pgstore.NewABTestStore(pool)
+	abTestMw := middleware.NewABTestMiddleware(abTestStore, logger)
+	if err := abTestMw.Reload(context.Background()); err != nil {
+		logger.Warn("failed to load ab tests; a/b testing disabled", "error", err)
+	}
+
+	// --- Billing / Chargeback ---
+	billingStore := pgstore.NewBillingStore(pool)
+	chargebackSvc := billing.NewChargebackService(billingStore)
+	billingScheduler := billing.NewScheduler(chargebackSvc, nil, logger)
+	billingScheduler.Start()
+	defer billingScheduler.Stop()
+
 	// /v1 routes — protected by virtual key auth
 	chatHandler := router.Setup(r, registry, fr, buildFallbackChains(cfg.Routing), logger,
-		authMw.Middleware, logWriter, tracker, rateLimiter, budgetMgr, costCalc, cacheMw, guardrailPipeline, advRouter, promptSvc)
+		authMw.Middleware, logWriter, tracker, rateLimiter, budgetMgr, costCalc, cacheMw, guardrailPipeline, advRouter, promptSvc, abTestMw)
 
 	// Subscribe chat handler to routing config changes so that PUT /admin/routing
 	// immediately updates the active fallback chains.
@@ -231,7 +246,8 @@ func main() {
 	roleStore := pgstore.NewRoleStore(pool)
 	registerAdminRoutes(r, keyStore, keyCache, km, cipher, pool, logStore, cb, cfg, logger,
 		rateLimiter, budgetMgr, budgetStore, routingStore, orgStore, roleStore, ec, ruleStore, advRouter,
-		auditLogger, auditStore, alertRouter, promptStore, promptSvc)
+		auditLogger, auditStore, alertRouter, promptStore, promptSvc,
+		abTestStore, abTestMw, billingStore, chargebackSvc)
 
 	// /auth/* — OAuth / SSO endpoints
 	oauthProviders := buildOAuthProviders(cfg)
@@ -399,6 +415,10 @@ func registerAdminRoutes(
 	alertRouter *alerting.Router,
 	promptStore *pgstore.PromptStore,
 	promptSvc *prompt.Service,
+	abTestStore *pgstore.ABTestStore,
+	abTestMw *middleware.ABTestMiddleware,
+	billingStore *pgstore.BillingStore,
+	chargebackSvc *billing.ChargebackService,
 ) {
 	adminMw := auth.AdminAuth(cfg.Gateway.MasterKey)
 
@@ -526,6 +546,31 @@ func registerAdminRoutes(
 			r.Post("/admin/prompts/{slug}/rollback/{version}", promptsHandler.Rollback)
 			r.Post("/admin/prompts/{slug}/render", promptsHandler.Render)
 			r.Get("/admin/prompts/{slug}/diff", promptsHandler.Diff)
+		}
+
+		// A/B testing
+		if abTestStore != nil {
+			abHandler := handler.NewAdminABTestsHandler(abTestStore, abTestMw)
+			r.Post("/admin/ab-tests", abHandler.Create)
+			r.Get("/admin/ab-tests", abHandler.List)
+			r.Get("/admin/ab-tests/{id}", abHandler.Get)
+			r.Get("/admin/ab-tests/{id}/results", abHandler.Results)
+			r.Post("/admin/ab-tests/{id}/start", abHandler.Start)
+			r.Post("/admin/ab-tests/{id}/pause", abHandler.Pause)
+			r.Post("/admin/ab-tests/{id}/stop", abHandler.Stop)
+			r.Post("/admin/ab-tests/{id}/promote", abHandler.Promote)
+		}
+
+		// Chargeback / Showback reports
+		if billingStore != nil {
+			reportsHandler := handler.NewAdminReportsHandler(chargebackSvc, billingStore)
+			r.Get("/admin/reports/chargeback", reportsHandler.Chargeback)
+			r.Get("/admin/reports/showback", reportsHandler.Showback)
+			r.Get("/admin/billing/markup", reportsHandler.GetMarkup)
+			r.Put("/admin/billing/markup", reportsHandler.UpsertMarkup)
+
+			billingAPIHandler := handler.NewBillingAPIHandler(billingStore)
+			r.Get("/api/billing/usage", billingAPIHandler.Usage)
 		}
 
 		// OpenAPI spec

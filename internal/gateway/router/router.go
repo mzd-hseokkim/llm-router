@@ -36,6 +36,7 @@ func Setup(
 	guardrailPipeline *guardrail.Pipeline,
 	advancedRouter *AdvancedRouter,
 	promptSvc *prompt.Service,
+	abTestMw *middleware.ABTestMiddleware,
 ) *handler.ChatHandler {
 	r.Use(middleware.Recovery(logger))
 	r.Use(middleware.RequestMeta)
@@ -69,6 +70,11 @@ func Setup(
 		// Prompt injection middleware
 		if promptSvc != nil {
 			r.Use(middleware.PromptInjector(promptSvc, logger))
+		}
+
+		// A/B test middleware — must run after auth so entity ID is resolvable
+		if abTestMw != nil {
+			r.Use(abTestMw.Handler())
 		}
 
 		chat = handler.NewChatHandler(fr, logger).WithChains(chains)

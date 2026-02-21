@@ -1,0 +1,22 @@
+apiVersion: v2
+name: llm-gateway
+description: LLM Router Gateway — multi-provider LLM API gateway
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - llm
+  - ai
+  - gateway
+  - openai
+maintainers:
+  - name: LLM Router Team
+dependencies:
+  - name: postgresql
+    version: "13.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: redis
+    version: "18.x.x"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled

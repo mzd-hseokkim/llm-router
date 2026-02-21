@@ -89,11 +89,11 @@ tasks/
 |---|------|----------|
 | 01 | [ML 기반 지능형 라우팅](phase4-advanced/01-ml-routing.md) | 비용-품질 최적화 자동 Provider 선택 |
 | 02 | ✅ [프롬프트 관리](phase4-advanced/02-prompt-management.md) | 버전 관리, 템플릿, 팀 간 공유 |
-| 03 | [A/B 테스트 라우팅](phase4-advanced/03-ab-test-routing.md) | 트래픽 분할, 통계 분석, 자동 승자 전환 |
+| 03 | ✅ [A/B 테스트 라우팅](phase4-advanced/03-ab-test-routing.md) | 트래픽 분할, 통계 분석, 자동 승자 전환 |
 | 04 | [데이터 레지던시](phase4-advanced/04-data-residency.md) | GDPR·HIPAA 지역 제한 강제 라우팅 |
-| 05 | [온프레미스 배포](phase4-advanced/05-on-premise.md) | Helm Chart, 단일 바이너리, 에어갭 지원 |
+| 05 | ✅ [온프레미스 배포](phase4-advanced/05-on-premise.md) | Helm Chart, 단일 바이너리, 에어갭 지원 |
 | 06 | ✅ [자체 호스팅 모델](phase4-advanced/06-self-hosted-models.md) | Ollama·vLLM·TGI 로컬 모델 연동 |
-| 07 | [차지백/쇼백 리포트](phase4-advanced/07-chargeback-reports.md) | 부서별 비용 할당, 외부 빌링 API |
+| 07 | ✅ [차지백/쇼백 리포트](phase4-advanced/07-chargeback-reports.md) | 부서별 비용 할당, 외부 빌링 API |
 | 08 | [MCP Gateway](phase4-advanced/08-mcp-gateway.md) | Model Context Protocol 중앙 허브 |
 | 09 | ✅ [OpenAPI 문서](phase4-advanced/09-openapi-docs.md) | Swagger UI, Admin API 명세 자동화 |
 

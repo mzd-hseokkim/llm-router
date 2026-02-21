@@ -1,0 +1,156 @@
+## LLM Gateway Helm values
+## Ref: https://github.com/company/llm-gateway
+
+replicaCount: 3
+
+image:
+  repository: ghcr.io/company/llm-gateway
+  pullPolicy: IfNotPresent
+  tag: ""  # Defaults to appVersion
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  fsGroup: 65534
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+  readOnlyRootFilesystem: true
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: gateway.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: gateway-tls
+  #    hosts:
+  #      - gateway.example.com
+
+resources:
+  requests:
+    cpu: "500m"
+    memory: "256Mi"
+  limits:
+    cpu: "2000m"
+    memory: "1Gi"
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+## Gateway environment configuration.
+## Sensitive values should come from existingSecret.
+config:
+  logLevel: info
+  logFormat: json
+
+## Name of an existing Secret containing:
+##   DATABASE_URL, REDIS_ADDR, MASTER_KEY, ENCRYPTION_KEY
+existingSecret: ""
+
+## If existingSecret is empty, provide values directly (not recommended for production).
+secrets:
+  databaseURL: ""
+  redisAddr: "redis-master:6379"
+  masterKey: ""
+  encryptionKey: ""
+
+## Provider API keys (use existingSecret in production).
+providers:
+  openai:
+    apiKey: ""
+  anthropic:
+    apiKey: ""
+  gemini:
+    apiKey: ""
+
+livenessProbe:
+  httpGet:
+    path: /health/live
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  failureThreshold: 3
+
+## Graceful shutdown drain timeout (must match server.drain_timeout in config.yaml).
+terminationGracePeriodSeconds: 35
+
+nodeSelector: {}
+tolerations: []
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [llm-gateway]
+          topologyKey: kubernetes.io/hostname
+
+## Subchart: PostgreSQL (Bitnami)
+postgresql:
+  enabled: true
+  auth:
+    database: llmrouter
+    existingSecret: gateway-db-secret
+    secretKeys:
+      adminPasswordKey: postgres-password
+      userPasswordKey: password
+  primary:
+    persistence:
+      size: 20Gi
+    initdb:
+      scripts:
+        00_extensions.sql: |
+          CREATE EXTENSION IF NOT EXISTS vector;
+
+## Subchart: Redis (Bitnami)
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      size: 2Gi
