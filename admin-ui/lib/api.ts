@@ -192,6 +192,15 @@ export interface Team {
   updated_at: string;
 }
 
+export interface User {
+  id: string;
+  org_id?: string;
+  team_id?: string;
+  email: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // --- Virtual Keys ---
 
 export const keys = {
@@ -321,21 +330,39 @@ export const usage = {
 // --- Organizations ---
 
 export const orgs = {
-  list: () => apiFetch<{ data: Organization[] }>("/organizations").then((r) => r.data),
+  list: () => apiFetch<{ data: Organization[] }>("/organizations").then((r) => r.data ?? []),
   create: (name: string) =>
-    apiFetch<Organization>("/organizations", {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    }),
+    apiFetch<Organization>("/organizations", { method: "POST", body: JSON.stringify({ name }) }),
+  update: (id: string, name: string) =>
+    apiFetch<Organization>(`/organizations/${id}`, { method: "PUT", body: JSON.stringify({ name }) }),
 };
 
 // --- Teams ---
 
 export const teams = {
   list: (orgId?: string) =>
-    apiFetch<{ data: Team[] }>(
-      `/teams${orgId ? `?org_id=${orgId}` : ""}`
-    ).then((r) => r.data),
+    apiFetch<{ data: Team[] }>(`/teams${orgId ? `?org_id=${orgId}` : ""}`).then((r) => r.data ?? []),
+  create: (orgId: string, name: string) =>
+    apiFetch<Team>("/teams", { method: "POST", body: JSON.stringify({ org_id: orgId, name }) }),
+  update: (id: string, name: string) =>
+    apiFetch<Team>(`/teams/${id}`, { method: "PUT", body: JSON.stringify({ name }) }),
+};
+
+// --- Users ---
+
+export const users = {
+  list: (orgId?: string) =>
+    apiFetch<{ data: User[] }>(`/users${orgId ? `?org_id=${orgId}` : ""}`).then((r) => r.data ?? []),
+  create: (orgId: string, email: string, teamId?: string) =>
+    apiFetch<User>("/users", {
+      method: "POST",
+      body: JSON.stringify({ org_id: orgId, email, team_id: teamId }),
+    }),
+  update: (id: string, email: string, teamId?: string) =>
+    apiFetch<User>(`/users/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ email, team_id: teamId ?? null }),
+    }),
 };
 
 // --- Guardrails ---

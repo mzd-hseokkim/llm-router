@@ -232,7 +232,7 @@ client = <span class="c-fn">OpenAI</span>(
 )
 
 response = client.chat.completions.<span class="c-fn">create</span>(
-    model=<span class="c-string">"gpt-4o"</span>,        <span class="c-comment"># or "claude-3-5-sonnet", "gemini-2.0-flash"</span>
+    model=<span class="c-string">"gpt-5.2"</span>,        <span class="c-comment"># or "claude-sonnet-4-6", "gemini-3.1-pro"</span>
     messages=[{<span class="c-string">"role"</span>: <span class="c-string">"user"</span>, <span class="c-string">"content"</span>: <span class="c-string">"Hello"</span>}]
 )
 <span class="c-comment"># Gateway handles routing, fallback, cost tracking — automatically.</span></pre>
@@ -321,9 +321,7 @@ response = client.chat.completions.<span class="c-fn">create</span>(
     <div class="features-grid">
 <div class="feature-card fade-in" style="transition-delay:0.05s"><div class="feature-icon">🔒</div><h3 data-i18n="feat.f2.t">Zero-Exposure Key Security</h3><p data-i18n="feat.f2.p">Provider API keys are encrypted with AES-256-GCM and never leave the Gateway. Clients see only virtual keys — Provider credentials stay hidden.</p></div>
       <div class="feature-card fade-in" style="transition-delay:0.1s"><div class="feature-icon">💰</div><h3 data-i18n="feat.f3.t">Cost Control & Chargeback</h3><p data-i18n="feat.f3.p">Per-team soft/hard budgets, real-time cost tracking, and automated chargeback reports. Know exactly where every dollar goes.</p></div>
-      <div class="feature-card fade-in" style="transition-delay:0.05s"><div class="feature-icon">🏢</div><h3 data-i18n="feat.f4.t">Enterprise Multi-Tenancy</h3><p data-i18n="feat.f4.p">4-tier Org → Team → User → Key hierarchy with RBAC, OAuth/SSO (Google, GitHub, Okta, OIDC), and isolated data per tenant.</p></div>
       <div class="feature-card fade-in" style="transition-delay:0.1s"><div class="feature-icon">⚡</div><h3 data-i18n="feat.f5.t">Exact-Match Caching</h3><p data-i18n="feat.f5.p">Redis-backed exact-match caching for temperature=0 requests. Identical prompts skip the model entirely — instant response, zero cost.</p></div>
-      <div class="feature-card fade-in" style="transition-delay:0.15s"><div class="feature-icon">🔌</div><h3 data-i18n="feat.f6.t">MCP Gateway Hub</h3><p data-i18n="feat.f6.p">Central hub for Model Context Protocol — route tool calls, manage server registrations, and proxy WebSocket/SSE/stdio transports.</p></div>
       <div class="feature-card fade-in"><div class="feature-icon">🛡️</div><h3 data-i18n="feat.f7.t">Guardrails & PII Protection</h3><p data-i18n="feat.f7.p">Block prompt injections, mask PII before it reaches any model, and enforce content policies — at the gateway layer, before any token is spent.</p></div>
       <div class="feature-card fade-in" style="transition-delay:0.05s"><div class="feature-icon">🔄</div><h3 data-i18n="feat.f8.t">Failover & Circuit Breakers</h3><p data-i18n="feat.f8.p">Automatic provider failover with weighted load balancing. Circuit breakers isolate failing providers so your service stays up.</p></div>
       <div class="feature-card fade-in" style="transition-delay:0.1s"><div class="feature-icon">📊</div><h3 data-i18n="feat.f9.t">Full Observability</h3><p data-i18n="feat.f9.p">OpenTelemetry tracing, Prometheus metrics, immutable audit logs with GDPR/HIPAA retention policies, and Slack/email alerting.</p></div>
@@ -358,7 +356,7 @@ client = <span class="c-fn">OpenAI</span>(
 <span class="c-comment"># No rate limiting</span>
 
 response = client.chat.completions.<span class="c-fn">create</span>(
-    model=<span class="c-string">"gpt-4o"</span>,
+    model=<span class="c-string">"gpt-5.2"</span>,
     messages=[...]
 )</pre>
       </div>
@@ -381,7 +379,7 @@ client = <span class="c-fn">OpenAI</span>(
 <span class="c-comment"># ✓ Rate limiting per team</span>
 
 response = client.chat.completions.<span class="c-fn">create</span>(
-    model=<span class="c-string">"gpt-4o"</span>,
+    model=<span class="c-string">"gpt-5.2"</span>,
     messages=[...]
 )</pre>
       </div>
@@ -400,13 +398,12 @@ response = client.chat.completions.<span class="c-fn">create</span>(
       <div class="detail-text">
         <p class="section-label" data-i18n="d2.label">Enterprise Ready</p>
         <h3 data-i18n="d2.title">Built for teams, trusted by organizations</h3>
-        <p data-i18n="d2.p">A full 4-tier hierarchy with RBAC, SSO, and complete data isolation per tenant. Every action is audit-logged with immutable tamper-evident records.</p>
+        <p data-i18n="d2.p">Per-team budgets and rate limits, immutable audit logs, and data residency enforcement — everything ops and compliance teams need.</p>
         <ul class="feature-list">
-          <li data-i18n="d2.l1">Org → Team → User → Virtual Key hierarchy</li>
-          <li data-i18n="d2.l2">Role-based access control with custom roles</li>
-          <li data-i18n="d2.l3">Google, GitHub, Okta, and custom OIDC SSO</li>
-          <li data-i18n="d2.l4">SOC2-grade immutable audit logs with retention policies</li>
-          <li data-i18n="d2.l5">Data residency enforcement for GDPR and HIPAA</li>
+          <li data-i18n="d2.l1">Per-key rate limits (RPM / TPM) and hard budget caps</li>
+          <li data-i18n="d2.l2">Automated chargeback reports by team or cost center</li>
+          <li data-i18n="d2.l3">SOC2-grade immutable audit logs with retention policies</li>
+          <li data-i18n="d2.l4">Data residency enforcement for GDPR and HIPAA</li>
         </ul>
       </div>
       <div class="detail-visual">
@@ -515,12 +512,10 @@ const T = {
     'feat.f2.p':     'Provider API keys are encrypted with AES-256-GCM and never leave the Gateway. Clients see only virtual keys — Provider credentials stay hidden.',
     'feat.f3.t':     'Cost Control & Chargeback',
     'feat.f3.p':     'Per-team soft/hard budgets, real-time cost tracking, and automated chargeback reports. Know exactly where every dollar goes.',
-    'feat.f4.t':     'Enterprise Multi-Tenancy',
-    'feat.f4.p':     '4-tier Org → Team → User → Key hierarchy with RBAC, OAuth/SSO (Google, GitHub, Okta, OIDC), and isolated data per tenant.',
+    'feat.f4.t':     'Advanced Routing',
+    'feat.f4.p':     'Route by model, context length, time-of-day, or metadata. ML-based automatic provider selection optimizes for cost and quality.',
     'feat.f5.t':     'Exact-Match Caching',
     'feat.f5.p':     'Redis-backed exact-match caching for temperature=0 requests. Identical prompts skip the model entirely — instant response, zero cost.',
-    'feat.f6.t':     'MCP Gateway Hub',
-    'feat.f6.p':     'Central hub for Model Context Protocol — route tool calls, manage server registrations, and proxy WebSocket/SSE/stdio transports.',
     'feat.f7.t':     'Guardrails & PII Protection',
     'feat.f7.p':     'Block prompt injections, mask PII before it reaches any model, and enforce content policies — at the gateway layer, before any token is spent.',
     'feat.f8.t':     'Failover & Circuit Breakers',
@@ -535,12 +530,11 @@ const T = {
     'code.compat':   'Works with Python, TypeScript, Go, Ruby, curl — any OpenAI-compatible client.',
     'd2.label':      'Enterprise Ready',
     'd2.title':      'Built for teams, trusted by organizations',
-    'd2.p':          'A full 4-tier hierarchy with RBAC, SSO, and complete data isolation per tenant. Every action is audit-logged with immutable tamper-evident records.',
-    'd2.l1':         'Org → Team → User → Virtual Key hierarchy',
-    'd2.l2':         'Role-based access control with custom roles',
-    'd2.l3':         'Google, GitHub, Okta, and custom OIDC SSO',
-    'd2.l4':         'SOC2-grade immutable audit logs with retention policies',
-    'd2.l5':         'Data residency enforcement for GDPR and HIPAA',
+    'd2.p':          'Per-team budgets and rate limits, immutable audit logs, and data residency enforcement — everything ops and compliance teams need.',
+    'd2.l1':         'Per-key rate limits (RPM / TPM) and hard budget caps',
+    'd2.l2':         'Automated chargeback reports by team or cost center',
+    'd2.l3':         'SOC2-grade immutable audit logs with retention policies',
+    'd2.l4':         'Data residency enforcement for GDPR and HIPAA',
     'd2.v.label':    'Team Budget Overview',
     'd2.v1.t':       'Engineering',
     'd2.v2.t':       'Data Science',
@@ -602,12 +596,10 @@ const T = {
     'feat.f2.p':     'AES-256-GCM으로 암호화한 프로바이더 키는 게이트웨이 밖으로 절대 나가지 않습니다. 클라이언트에는 가상 키만 보입니다.',
     'feat.f3.t':     '비용 제어 & 차지백',
     'feat.f3.p':     '팀별 예산 한도 설정, 실시간 비용 모니터링, 자동 차지백 리포트. 비용이 어디서 얼마나 나가는지 한눈에 파악하세요.',
-    'feat.f4.t':     '엔터프라이즈 멀티테넌시',
-    'feat.f4.p':     'Org → Team → User → Key 4단계 계층, RBAC, OAuth/SSO(Google · GitHub · Okta · OIDC), 테넌트별 완전 격리까지.',
+    'feat.f4.t':     '고급 라우팅',
+    'feat.f4.p':     '모델명, 컨텍스트 길이, 시간대, 메타데이터 조건으로 라우팅. ML 기반 자동 프로바이더 선택으로 비용과 품질을 동시에 최적화합니다.',
     'feat.f5.t':     '정확 매칭 캐시',
     'feat.f5.p':     'temperature=0 요청에 한해 Redis 기반 정확 매칭 캐시를 적용합니다. 동일한 프롬프트는 모델을 거치지 않고 즉시 응답 — 비용 없이.',
-    'feat.f6.t':     'MCP 게이트웨이 허브',
-    'feat.f6.p':     'Model Context Protocol의 중앙 허브입니다. 툴 호출 라우팅, MCP 서버 관리, WebSocket/SSE/stdio 프록시를 한곳에서.',
     'feat.f7.t':     '가드레일 & PII 보호',
     'feat.f7.p':     '프롬프트 인젝션 차단, 모델에 닿기 전 PII 자동 마스킹, 콘텐츠 정책 강제. 토큰이 소모되기 전, 게이트웨이 선에서 막습니다.',
     'feat.f8.t':     '자동 폴백 & 서킷 브레이커',
@@ -622,12 +614,11 @@ const T = {
     'code.compat':   'Python, TypeScript, Go, Ruby, curl — OpenAI 호환 클라이언트라면 뭐든 됩니다.',
     'd2.label':      '엔터프라이즈',
     'd2.title':      '팀을 위해 만들고, 조직이 믿고 쓰는',
-    'd2.p':          'RBAC, SSO, 테넌트별 완전 격리를 갖춘 4단계 계층 구조. 모든 액션은 위·변조 불가능한 감사 로그로 남습니다.',
-    'd2.l1':         'Org → Team → User → 가상 키, 4단계 계층',
-    'd2.l2':         '커스텀 역할을 포함한 역할 기반 접근 제어(RBAC)',
-    'd2.l3':         'Google · GitHub · Okta · 커스텀 OIDC SSO 지원',
-    'd2.l4':         '보존 정책이 적용된 SOC2급 불변 감사 로그',
-    'd2.l5':         'GDPR · HIPAA 데이터 레지던시 강제 라우팅',
+    'd2.p':          '가상 키별 예산·속도 제한, 불변 감사 로그, 데이터 레지던시 강제 라우팅 — 운영팀과 컴플라이언스팀이 요구하는 것들.',
+    'd2.l1':         '가상 키별 RPM/TPM 속도 제한 및 하드 예산 한도',
+    'd2.l2':         '팀·비용 센터별 자동 차지백 리포트',
+    'd2.l3':         '보존 정책이 적용된 SOC2급 불변 감사 로그',
+    'd2.l4':         'GDPR · HIPAA 데이터 레지던시 강제 라우팅',
     'd2.v.label':    '팀 예산 현황',
     'd2.v1.t':       '엔지니어링',
     'd2.v2.t':       '데이터 사이언스',

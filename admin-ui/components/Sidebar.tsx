@@ -9,6 +9,7 @@ const nav = [
   { href: "/playground", label: "Playground" },
   { href: "/keys", label: "Virtual Keys" },
   { href: "/providers", label: "Providers" },
+  { href: "/orgs", label: "Organizations" },
   { href: "/guardrails", label: "Guardrails" },
   { href: "/usage", label: "Usage" },
   { href: "/logs", label: "Logs" },
