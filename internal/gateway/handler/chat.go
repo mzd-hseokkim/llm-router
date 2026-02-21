@@ -15,6 +15,7 @@ import (
 	"github.com/llm-router/gateway/internal/gateway/proxy"
 	"github.com/llm-router/gateway/internal/gateway/types"
 	"github.com/llm-router/gateway/internal/provider"
+	"github.com/llm-router/gateway/internal/residency"
 	"github.com/llm-router/gateway/internal/telemetry"
 )
 
@@ -24,13 +25,19 @@ type advancedResolver interface {
 	Resolve(ctx context.Context, req *types.ChatCompletionRequest) (fallback.Chain, bool)
 }
 
+// residencyEnforcer filters fallback chains according to a data residency policy.
+type residencyEnforcer interface {
+	FilterChain(policyName string, chain fallback.Chain, model string) (fallback.Chain, error)
+}
+
 // ChatHandler handles POST /v1/chat/completions.
 type ChatHandler struct {
-	fallbackRouter *fallback.Router
-	advRouter      advancedResolver // optional advanced routing engine
-	mu             sync.RWMutex
-	chains         map[string]fallback.Chain // name → chain, from routing config
-	logger         *slog.Logger
+	fallbackRouter    *fallback.Router
+	advRouter         advancedResolver  // optional advanced routing engine
+	residencyEnforcer residencyEnforcer // optional data residency enforcer
+	mu                sync.RWMutex
+	chains            map[string]fallback.Chain // name → chain, from routing config
+	logger            *slog.Logger
 }
 
 // NewChatHandler returns a ChatHandler wired to the given fallback router.
@@ -46,6 +53,13 @@ func NewChatHandler(fr *fallback.Router, logger *slog.Logger) *ChatHandler {
 // The engine takes precedence over the named-chain config routing.
 func (h *ChatHandler) WithAdvancedRouter(ar advancedResolver) *ChatHandler {
 	h.advRouter = ar
+	return h
+}
+
+// WithResidencyEnforcer attaches an optional data residency enforcer.
+// It filters fallback chain targets based on the active policy in context.
+func (h *ChatHandler) WithResidencyEnforcer(re residencyEnforcer) *ChatHandler {
+	h.residencyEnforcer = re
 	return h
 }
 
@@ -99,6 +113,19 @@ func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("no provider available for model: %s", req.Model),
 			"invalid_request_error", "model_not_found")
 		return
+	}
+
+	// Data residency: filter chain targets to only compliant providers.
+	if h.residencyEnforcer != nil {
+		if policyName := residency.PolicyFromContext(r.Context()); policyName != "" {
+			var rerr error
+			chain, rerr = h.residencyEnforcer.FilterChain(policyName, chain, req.Model)
+			if rerr != nil {
+				writeError(w, http.StatusUnavailableForLegalReasons,
+					rerr.Error(), "data_residency_violation", "no_compliant_provider")
+				return
+			}
+		}
 	}
 
 	// Set primary provider for telemetry (first target in chain).

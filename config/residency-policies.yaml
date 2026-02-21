@@ -1,0 +1,63 @@
+# Data Residency Policy Configuration
+# 이 파일의 내용을 config/config.yaml 의 data_residency 섹션에 병합하거나
+# LLM_ROUTER_DATA_RESIDENCY_* 환경변수로 오버라이드 가능.
+
+data_residency:
+  enabled: true
+
+  policies:
+    # EU-only: GDPR 준수 - EU 내 데이터 처리 강제
+    - name: eu-only
+      allowed_providers:
+        - name: azure
+          region: westeurope       # Azure EU West
+        - name: azure_eu
+          region: westeurope
+        - name: bedrock
+          region: eu-west-1        # AWS EU (Ireland)
+      blocked_providers:
+        - gemini                   # Google: EU 전용 엔드포인트 미지원
+      allowed_regions:
+        - eu-west-1
+        - eu-central-1
+        - westeurope
+
+    # US-only: FedRAMP 요구사항
+    - name: us-only
+      allowed_providers:
+        - name: openai
+          region: us
+        - name: anthropic
+          region: us
+        - name: azure
+          region: eastus
+        - name: bedrock
+          region: us-east-1
+        - name: gemini
+          region: us
+      allowed_regions:
+        - us-east-1
+        - us-west-2
+        - eastus
+
+    # HIPAA 준수: BAA 체결 완료 Provider만 허용
+    - name: hipaa
+      allowed_providers:
+        - name: azure              # HIPAA BAA 체결 완료
+          region: eastus
+        - name: bedrock            # AWS HIPAA BAA 체결 완료
+          region: us-east-1
+      blocked_providers:
+        - openai                   # BAA 미체결
+        - anthropic                # BAA 미체결
+        - gemini                   # BAA 미체결
+
+    # 한국 개인정보보호법: 국내 데이터 처리 원칙
+    - name: korea-domestic
+      allowed_providers:
+        - name: azure
+          region: koreacentral
+        - name: bedrock
+          region: ap-northeast-2   # 서울 리전
+      blocked_providers:
+        - gemini

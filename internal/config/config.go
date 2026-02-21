@@ -12,18 +12,69 @@ import (
 )
 
 type Config struct {
-	Server     ServerConfig     `koanf:"server"`
-	Database   DatabaseConfig   `koanf:"database"`
-	Redis      RedisConfig      `koanf:"redis"`
-	Log        LogConfig        `koanf:"log"`
-	Providers  ProvidersConfig  `koanf:"providers"`
-	Gateway    GatewayConfig    `koanf:"gateway"`
-	Routing    RoutingConfig    `koanf:"routing"`
-	Auth       AuthConfig       `koanf:"auth"`
-	Guardrails GuardrailConfig  `koanf:"guardrails"`
-	Cache      CacheConfig      `koanf:"cache"`
-	Alerting   AlertingConfig   `koanf:"alerting"`
-	MCP        MCPConfig        `koanf:"mcp"`
+	Server        ServerConfig        `koanf:"server"`
+	Database      DatabaseConfig      `koanf:"database"`
+	Redis         RedisConfig         `koanf:"redis"`
+	Log           LogConfig           `koanf:"log"`
+	Providers     ProvidersConfig     `koanf:"providers"`
+	Gateway       GatewayConfig       `koanf:"gateway"`
+	Routing       RoutingConfig       `koanf:"routing"`
+	Auth          AuthConfig          `koanf:"auth"`
+	Guardrails    GuardrailConfig     `koanf:"guardrails"`
+	Cache         CacheConfig         `koanf:"cache"`
+	Alerting      AlertingConfig      `koanf:"alerting"`
+	MCP           MCPConfig           `koanf:"mcp"`
+	DataResidency DataResidencyConfig `koanf:"data_residency"`
+	MLRouting     MLRoutingConfig     `koanf:"ml_routing"`
+}
+
+// DataResidencyConfig holds data residency policy configuration.
+type DataResidencyConfig struct {
+	Enabled  bool                    `koanf:"enabled"`
+	Policies []ResidencyPolicyConfig `koanf:"policies"`
+}
+
+// ResidencyPolicyConfig defines one named residency policy.
+type ResidencyPolicyConfig struct {
+	Name             string                   `koanf:"name"`
+	AllowedProviders []AllowedProviderConfig  `koanf:"allowed_providers"`
+	BlockedProviders []string                 `koanf:"blocked_providers"`
+	AllowedRegions   []string                 `koanf:"allowed_regions"`
+}
+
+// AllowedProviderConfig allows a provider, optionally constrained to a region.
+type AllowedProviderConfig struct {
+	Name   string `koanf:"name"`
+	Region string `koanf:"region"` // optional; informational only
+}
+
+// MLRoutingConfig holds ML-based intelligent routing configuration.
+type MLRoutingConfig struct {
+	Enabled bool   `koanf:"enabled"`
+	Mode    string `koanf:"mode"` // "shadow" | "live"
+
+	Weights      MLRoutingWeights      `koanf:"weights"`
+	QualityTiers []MLQualityTierConfig `koanf:"quality_tiers"`
+}
+
+// MLRoutingWeights defines the relative weights for the routing score.
+type MLRoutingWeights struct {
+	Cost        float64 `koanf:"cost"`
+	Quality     float64 `koanf:"quality"`
+	Latency     float64 `koanf:"latency"`
+	Reliability float64 `koanf:"reliability"`
+}
+
+// MLQualityTierConfig maps a tier name to provider+model entries.
+type MLQualityTierConfig struct {
+	Name    string           `koanf:"name"` // economy | medium | premium
+	Models  []MLModelConfig  `koanf:"models"`
+}
+
+// MLModelConfig is a provider+model pair in a quality tier.
+type MLModelConfig struct {
+	Provider string `koanf:"provider"`
+	Model    string `koanf:"model"`
 }
 
 // MCPConfig holds Model Context Protocol Gateway configuration.

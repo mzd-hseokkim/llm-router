@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 
@@ -10,12 +11,21 @@ import (
 	"github.com/llm-router/gateway/internal/gateway/fallback"
 	"github.com/llm-router/gateway/internal/gateway/handler"
 	"github.com/llm-router/gateway/internal/gateway/middleware"
+	"github.com/llm-router/gateway/internal/gateway/types"
 	"github.com/llm-router/gateway/internal/guardrail"
 	"github.com/llm-router/gateway/internal/prompt"
 	"github.com/llm-router/gateway/internal/provider"
 	"github.com/llm-router/gateway/internal/ratelimit"
+	"github.com/llm-router/gateway/internal/residency"
 	"github.com/llm-router/gateway/internal/telemetry"
 )
+
+// AdvancedResolverIface is implemented by any component that can resolve a
+// fallback.Chain from a chat completion request. This allows both the
+// rule-based AdvancedRouter and the ML-based Router to be used interchangeably.
+type AdvancedResolverIface interface {
+	Resolve(ctx context.Context, req *types.ChatCompletionRequest) (fallback.Chain, bool)
+}
 
 // Setup registers all /v1 API routes on the given chi router.
 // Returns the ChatHandler so callers can subscribe to routing config changes
@@ -34,9 +44,10 @@ func Setup(
 	costCalc *cost.Calculator,
 	cacheMw *middleware.CacheMiddleware,
 	guardrailPipeline *guardrail.Pipeline,
-	advancedRouter *AdvancedRouter,
+	advancedRouter AdvancedResolverIface,
 	promptSvc *prompt.Service,
 	abTestMw *middleware.ABTestMiddleware,
+	residencyEnforcer *residency.Enforcer,
 ) *handler.ChatHandler {
 	r.Use(middleware.Recovery(logger))
 	r.Use(middleware.RequestMeta)
@@ -67,6 +78,11 @@ func Setup(
 			r.Use(middleware.GuardrailCheck(guardrailPipeline))
 		}
 
+		// Data residency: extract policy from request header and store in context.
+		if residencyEnforcer != nil {
+			r.Use(middleware.DataResidency())
+		}
+
 		// Prompt injection middleware
 		if promptSvc != nil {
 			r.Use(middleware.PromptInjector(promptSvc, logger))
@@ -80,6 +96,9 @@ func Setup(
 		chat = handler.NewChatHandler(fr, logger).WithChains(chains)
 		if advancedRouter != nil {
 			chat = chat.WithAdvancedRouter(advancedRouter)
+		}
+		if residencyEnforcer != nil {
+			chat = chat.WithResidencyEnforcer(residencyEnforcer)
 		}
 		r.Post("/chat/completions", chat.Handle)
 

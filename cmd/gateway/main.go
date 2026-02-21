@@ -19,6 +19,7 @@ import (
 	"github.com/llm-router/gateway/internal/audit"
 	"github.com/llm-router/gateway/internal/mcp"
 	"github.com/llm-router/gateway/internal/auth"
+	"github.com/llm-router/gateway/internal/residency"
 	"github.com/llm-router/gateway/internal/auth/oauth"
 	"github.com/llm-router/gateway/internal/auth/rbac"
 	"github.com/llm-router/gateway/internal/auth/session"
@@ -41,6 +42,7 @@ import (
 	"github.com/llm-router/gateway/internal/billing"
 	"github.com/llm-router/gateway/internal/prompt"
 	"github.com/llm-router/gateway/internal/health"
+	"github.com/llm-router/gateway/internal/mlrouter"
 	internalhandler "github.com/llm-router/gateway/internal/handler"
 	"github.com/llm-router/gateway/internal/provider"
 	provideranthropic "github.com/llm-router/gateway/internal/provider/anthropic"
@@ -196,6 +198,12 @@ func main() {
 	ruleStore := pgstore.NewRoutingRuleStore(pool)
 	advRouter := buildAdvancedRouter(ruleStore, costCalc, logger)
 
+	// --- ML routing engine ---
+	mlRouter := buildMLRouter(cfg, costCalc, tracker, logger)
+	if mlRouter != nil {
+		defer mlRouter.Close()
+	}
+
 	// --- Prompt management ---
 	promptStore := pgstore.NewPromptStore(pool)
 	promptSvc := prompt.NewService(promptStore)
@@ -214,9 +222,18 @@ func main() {
 	billingScheduler.Start()
 	defer billingScheduler.Stop()
 
+	// --- Data Residency ---
+	residencyEnforcer := buildResidencyEnforcer(cfg)
+
+	// Prefer rule-based advanced router; fall back to ML router if available.
+	var activeAdvRouter router.AdvancedResolverIface = advRouter
+	if activeAdvRouter == nil && mlRouter != nil {
+		activeAdvRouter = mlRouter // live or shadow mode
+	}
+
 	// /v1 routes — protected by virtual key auth
 	chatHandler := router.Setup(r, registry, fr, buildFallbackChains(cfg.Routing), logger,
-		authMw.Middleware, logWriter, tracker, rateLimiter, budgetMgr, costCalc, cacheMw, guardrailPipeline, advRouter, promptSvc, abTestMw)
+		authMw.Middleware, logWriter, tracker, rateLimiter, budgetMgr, costCalc, cacheMw, guardrailPipeline, activeAdvRouter, promptSvc, abTestMw, residencyEnforcer)
 
 	// Subscribe chat handler to routing config changes so that PUT /admin/routing
 	// immediately updates the active fallback chains.
@@ -258,7 +275,7 @@ func main() {
 	registerAdminRoutes(r, keyStore, keyCache, km, cipher, pool, logStore, cb, cfg, logger,
 		rateLimiter, budgetMgr, budgetStore, routingStore, orgStore, roleStore, ec, ruleStore, advRouter,
 		auditLogger, auditStore, alertRouter, promptStore, promptSvc,
-		abTestStore, abTestMw, billingStore, chargebackSvc)
+		abTestStore, abTestMw, billingStore, chargebackSvc, residencyEnforcer, buildResidencyRegistry(cfg))
 
 	// /auth/* — OAuth / SSO endpoints
 	oauthProviders := buildOAuthProviders(cfg)
@@ -430,6 +447,8 @@ func registerAdminRoutes(
 	abTestMw *middleware.ABTestMiddleware,
 	billingStore *pgstore.BillingStore,
 	chargebackSvc *billing.ChargebackService,
+	residencyEnforcer *residency.Enforcer,
+	residencyRegistry *residency.Registry,
 ) {
 	adminMw := auth.AdminAuth(cfg.Gateway.MasterKey)
 
@@ -582,6 +601,15 @@ func registerAdminRoutes(
 
 			billingAPIHandler := handler.NewBillingAPIHandler(billingStore)
 			r.Get("/api/billing/usage", billingAPIHandler.Usage)
+		}
+
+		// Data residency policy management
+		if residencyRegistry != nil {
+			drHandler := handler.NewAdminResidencyHandler(residencyRegistry, residencyEnforcer)
+			r.Get("/admin/data-residency/policies", drHandler.List)
+			r.Get("/admin/data-residency/policies/{name}", drHandler.Get)
+			r.Post("/admin/data-residency/validate", drHandler.Validate)
+			r.Get("/admin/data-residency/report", drHandler.Report)
 		}
 
 		// OpenAPI spec
@@ -830,6 +858,84 @@ func registerMCPRoutes(
 		r.Get("/admin/mcp/servers/{name}/tools", adminMCPHandler.ListServerTools)
 		r.Post("/admin/mcp/policies", adminMCPHandler.SetPolicy)
 	})
+}
+
+// buildMLRouter constructs the ML routing engine from config.
+// Returns nil if ML routing is disabled or no quality tiers are configured.
+func buildMLRouter(cfg *config.Config, pricing *cost.Calculator, tracker *health.ProviderTracker, logger *slog.Logger) *mlrouter.Router {
+	if !cfg.MLRouting.Enabled || len(cfg.MLRouting.QualityTiers) == 0 {
+		return nil
+	}
+
+	mode := cfg.MLRouting.Mode
+	if mode == "" {
+		mode = mlrouter.ModeShadow
+	}
+
+	weights := mlrouter.Weights{
+		Cost:        cfg.MLRouting.Weights.Cost,
+		Quality:     cfg.MLRouting.Weights.Quality,
+		Latency:     cfg.MLRouting.Weights.Latency,
+		Reliability: cfg.MLRouting.Weights.Reliability,
+	}
+	// Apply defaults if all weights are zero.
+	if weights.Cost+weights.Quality+weights.Latency+weights.Reliability == 0 {
+		weights = mlrouter.DefaultWeights()
+	}
+
+	tiers := make([]mlrouter.TierConfig, 0, len(cfg.MLRouting.QualityTiers))
+	for _, t := range cfg.MLRouting.QualityTiers {
+		models := make([]mlrouter.ModelConfig, 0, len(t.Models))
+		for _, m := range t.Models {
+			models = append(models, mlrouter.ModelConfig{Provider: m.Provider, Model: m.Model})
+		}
+		tiers = append(tiers, mlrouter.TierConfig{Name: t.Name, Models: models})
+	}
+
+	routerCfg := mlrouter.Config{
+		Mode:         mode,
+		Weights:      weights,
+		QualityTiers: mlrouter.BuildTiers(tiers),
+	}
+	r := mlrouter.NewRouter(routerCfg, pricing, tracker, logger)
+	logger.Info("ml routing engine enabled", "mode", mode, "tiers", len(tiers))
+	return r
+}
+
+// buildResidencyRegistry converts config-file policies into a residency.Registry.
+// Returns nil if data residency is disabled.
+func buildResidencyRegistry(cfg *config.Config) *residency.Registry {
+	if !cfg.DataResidency.Enabled || len(cfg.DataResidency.Policies) == 0 {
+		return nil
+	}
+	policies := make([]*residency.Policy, 0, len(cfg.DataResidency.Policies))
+	for _, pc := range cfg.DataResidency.Policies {
+		allowed := make(map[string]residency.ProviderConstraint, len(pc.AllowedProviders))
+		for _, ap := range pc.AllowedProviders {
+			allowed[ap.Name] = residency.ProviderConstraint{Name: ap.Name, Region: ap.Region}
+		}
+		blocked := make(map[string]bool, len(pc.BlockedProviders))
+		for _, b := range pc.BlockedProviders {
+			blocked[b] = true
+		}
+		policies = append(policies, &residency.Policy{
+			Name:             pc.Name,
+			AllowedProviders: allowed,
+			BlockedProviders: blocked,
+			AllowedRegions:   pc.AllowedRegions,
+		})
+	}
+	return residency.NewRegistry(policies)
+}
+
+// buildResidencyEnforcer creates an Enforcer if data residency is enabled.
+// Returns nil when disabled so callers can safely skip residency checks.
+func buildResidencyEnforcer(cfg *config.Config) *residency.Enforcer {
+	registry := buildResidencyRegistry(cfg)
+	if registry == nil {
+		return nil
+	}
+	return residency.NewEnforcer(registry)
 }
 
 func setupLogger(cfg config.LogConfig) *slog.Logger {
