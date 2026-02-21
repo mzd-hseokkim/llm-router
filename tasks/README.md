@@ -94,7 +94,7 @@ tasks/
 | 05 | ✅ [온프레미스 배포](phase4-advanced/05-on-premise.md) | Helm Chart, 단일 바이너리, 에어갭 지원 |
 | 06 | ✅ [자체 호스팅 모델](phase4-advanced/06-self-hosted-models.md) | Ollama·vLLM·TGI 로컬 모델 연동 |
 | 07 | ✅ [차지백/쇼백 리포트](phase4-advanced/07-chargeback-reports.md) | 부서별 비용 할당, 외부 빌링 API |
-| 08 | [MCP Gateway](phase4-advanced/08-mcp-gateway.md) | Model Context Protocol 중앙 허브 |
+| 08 | ✅ [MCP Gateway](phase4-advanced/08-mcp-gateway.md) | Model Context Protocol 중앙 허브 |
 | 09 | ✅ [OpenAPI 문서](phase4-advanced/09-openapi-docs.md) | Swagger UI, Admin API 명세 자동화 |
 
 **Phase 4 완료 기준**: ML이 최적 Provider를 자동 선택, 팀이 프롬프트를 버전 관리, 자체 GPU도 Gateway로 통합

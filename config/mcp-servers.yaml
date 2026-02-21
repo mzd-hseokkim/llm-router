@@ -1,0 +1,52 @@
+# MCP Gateway Server Configuration
+#
+# Add this block to your main config.yaml, or use it as a reference.
+# All values can be overridden with environment variables via koanf's env provider.
+
+mcp:
+  enabled: true
+
+  # tool_cache_ttl caches idempotent tool results (file reads, DB queries, etc.)
+  # Set to 0 to disable caching.
+  tool_cache_ttl: 30s
+
+  servers:
+    # --- stdio transport: runs a local MCP server as a child process ---
+    - name: filesystem
+      type: stdio
+      command: npx
+      args:
+        - "-y"
+        - "@modelcontextprotocol/server-filesystem"
+        - "/data"
+      env:
+        PATH: /usr/local/bin:/usr/bin:/bin
+
+    - name: postgres
+      type: stdio
+      command: npx
+      args:
+        - "-y"
+        - "@modelcontextprotocol/server-postgres"
+        - "postgresql://user:pass@localhost:5432/mydb"
+
+    # --- SSE transport: connects to a remote MCP server over HTTP + Server-Sent Events ---
+    - name: web-search
+      type: sse
+      url: "https://mcp-search.company.com"
+      api_key: "${MCP_SEARCH_KEY}"
+
+    - name: internal-api
+      type: sse
+      url: "https://internal.company.com/mcp"
+      auth:
+        type: bearer
+        token: "${INTERNAL_MCP_TOKEN}"
+
+    # --- WebSocket transport: bidirectional real-time MCP server (ws:// only) ---
+    - name: realtime-data
+      type: websocket
+      url: "ws://realtime.internal:8080/mcp"
+      auth:
+        type: bearer
+        token: "${REALTIME_MCP_TOKEN}"

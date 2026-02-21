@@ -23,6 +23,39 @@ type Config struct {
 	Guardrails GuardrailConfig  `koanf:"guardrails"`
 	Cache      CacheConfig      `koanf:"cache"`
 	Alerting   AlertingConfig   `koanf:"alerting"`
+	MCP        MCPConfig        `koanf:"mcp"`
+}
+
+// MCPConfig holds Model Context Protocol Gateway configuration.
+type MCPConfig struct {
+	// Enabled controls whether the MCP Hub is started.
+	Enabled bool `koanf:"enabled"`
+
+	// Servers is the list of upstream MCP servers to connect to.
+	Servers []MCPServerConfig `koanf:"servers"`
+
+	// ToolCacheTTL is how long to cache idempotent tool results.
+	// Set to 0 to disable caching.
+	ToolCacheTTL time.Duration `koanf:"tool_cache_ttl"`
+}
+
+// MCPServerConfig describes one upstream MCP server.
+type MCPServerConfig struct {
+	Name    string            `koanf:"name"`
+	Type    string            `koanf:"type"`
+	Command string            `koanf:"command"`
+	Args    []string          `koanf:"args"`
+	Env     map[string]string `koanf:"env"`
+	URL     string            `koanf:"url"`
+	APIKey  string            `koanf:"api_key"`
+	Auth    MCPServerAuth     `koanf:"auth"`
+}
+
+// MCPServerAuth holds auth details for remote MCP servers.
+type MCPServerAuth struct {
+	Type  string `koanf:"type"`
+	Token string `koanf:"token"`
+	User  string `koanf:"user"`
 }
 
 // AuthConfig holds OAuth / SSO provider configuration.

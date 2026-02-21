@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"log/slog"
+	"net/http"
 	"os"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/llm-router/gateway/internal/alerting"
 	"github.com/llm-router/gateway/internal/audit"
+	"github.com/llm-router/gateway/internal/mcp"
 	"github.com/llm-router/gateway/internal/auth"
 	"github.com/llm-router/gateway/internal/auth/oauth"
 	"github.com/llm-router/gateway/internal/auth/rbac"
@@ -222,6 +224,15 @@ func main() {
 		chatHandler.SetChains(buildFallbackChains(newCfg))
 		logger.Info("fallback chains reloaded from routing store")
 	})
+
+	// /mcp/v1/* — MCP Gateway Hub (protected by virtual key auth)
+	if cfg.MCP.Enabled {
+		mcpHub := buildMCPHub(context.Background(), cfg, auditLogger, logger)
+		if mcpHub != nil {
+			defer mcpHub.Close()
+			registerMCPRoutes(r, mcpHub, cfg, logger, authMw.Middleware, auditLogger)
+		}
+	}
 
 	// /docs — Swagger UI (unauthenticated; spec itself is public)
 	docsHandler := handler.NewDocsHandler()
@@ -739,6 +750,86 @@ func buildAdvancedRouter(store *pgstore.RoutingRuleStore, pricing *cost.Calculat
 	}
 	logger.Info("advanced routing engine loaded", "rules", len(rules))
 	return ar
+}
+
+// buildMCPHub creates and connects the MCP Hub from config.
+// Returns nil if no servers are configured.
+func buildMCPHub(ctx context.Context, cfg *config.Config, auditLog *audit.Logger, logger *slog.Logger) *mcp.Hub {
+	if len(cfg.MCP.Servers) == 0 {
+		return nil
+	}
+
+	hub := mcp.NewHub(logger)
+	for _, sc := range cfg.MCP.Servers {
+		serverCfg := mcp.ServerConfig{
+			Name:    sc.Name,
+			Type:    sc.Type,
+			Command: sc.Command,
+			Args:    sc.Args,
+			Env:     sc.Env,
+			URL:     sc.URL,
+			APIKey:  sc.APIKey,
+			Auth: mcp.ServerAuthConfig{
+				Type:  sc.Auth.Type,
+				Token: sc.Auth.Token,
+				User:  sc.Auth.User,
+			},
+		}
+		hub.Register(mcp.NewServer(serverCfg))
+	}
+
+	hub.Connect(ctx)
+	logger.Info("mcp hub started", "servers", len(cfg.MCP.Servers))
+	return hub
+}
+
+// registerMCPRoutes mounts /mcp/v1/* and /admin/mcp/* endpoints.
+func registerMCPRoutes(
+	r chi.Router,
+	hub *mcp.Hub,
+	cfg *config.Config,
+	logger *slog.Logger,
+	authMw func(http.Handler) http.Handler,
+	auditLog *audit.Logger,
+) {
+	// Collect server configs for admin handler.
+	cfgs := make([]mcp.ServerConfig, 0, len(cfg.MCP.Servers))
+	for _, sc := range cfg.MCP.Servers {
+		cfgs = append(cfgs, mcp.ServerConfig{
+			Name: sc.Name, Type: sc.Type, URL: sc.URL,
+			Command: sc.Command, Args: sc.Args,
+		})
+	}
+
+	auditAdapter := mcp.NewAuditAdapter(auditLog, logger)
+	proxy := mcp.NewProxy(hub, logger, auditAdapter, cfg.MCP.ToolCacheTTL)
+	mcpHandler := handler.NewMCPHandler(proxy, logger)
+	adminMCPHandler := handler.NewAdminMCPHandler(hub, cfgs, logger)
+
+	// Public MCP endpoints (protected by virtual key auth).
+	r.Group(func(r chi.Router) {
+		r.Use(authMw)
+		r.Post("/mcp/v1/initialize", mcpHandler.Initialize)
+		r.Post("/mcp/v1/tools/list", mcpHandler.ListTools)
+		r.Post("/mcp/v1/tools/call", mcpHandler.CallTool)
+		r.Post("/mcp/v1/resources/list", mcpHandler.ListResources)
+		r.Post("/mcp/v1/resources/read", mcpHandler.ReadResource)
+		r.Post("/mcp/v1/prompts/list", mcpHandler.ListPrompts)
+		r.Post("/mcp/v1/prompts/get", mcpHandler.GetPrompt)
+	})
+
+	// Admin MCP endpoints (protected by master key).
+	adminMw := auth.AdminAuth(cfg.Gateway.MasterKey)
+	r.Group(func(r chi.Router) {
+		r.Use(adminMw)
+		r.Get("/admin/mcp/servers", adminMCPHandler.ListServers)
+		r.Post("/admin/mcp/servers", adminMCPHandler.RegisterServer)
+		r.Get("/admin/mcp/servers/{name}", adminMCPHandler.GetServer)
+		r.Delete("/admin/mcp/servers/{name}", adminMCPHandler.DeleteServer)
+		r.Get("/admin/mcp/servers/{name}/health", adminMCPHandler.HealthCheck)
+		r.Get("/admin/mcp/servers/{name}/tools", adminMCPHandler.ListServerTools)
+		r.Post("/admin/mcp/policies", adminMCPHandler.SetPolicy)
+	})
 }
 
 func setupLogger(cfg config.LogConfig) *slog.Logger {

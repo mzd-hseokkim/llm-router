@@ -51,6 +51,13 @@ const (
 	EventGuardrailPII        = "guardrail.pii_detected"
 	EventGuardrailInjection  = "guardrail.injection_detected"
 	EventGuardrailBlocked    = "guardrail.request_blocked"
+
+	// MCP Gateway
+	EventMCPToolCalled       = "mcp.tool_called"
+	EventMCPToolFailed       = "mcp.tool_failed"
+	EventMCPServerRegistered = "mcp.server_registered"
+	EventMCPServerRemoved    = "mcp.server_removed"
+	EventMCPPolicyDenied     = "mcp.policy_denied"
 )
 
 // Actor types.
