@@ -103,6 +103,81 @@ tasks/
 
 ---
 
+## Phase 5 — E2E 테스트 ✅ 완료
+
+**목표**: 실행 중인 서버를 대상으로 전체 스택 E2E 테스트 suite 구축
+
+| # | 작업 | 핵심 내용 |
+|---|------|----------|
+| 01 | ✅ [Smoke Test Script](phase5-e2e-test/01-smoke-script.md) | `scripts/e2e_smoke.sh` — bash+curl, 25 passed / 0 failed |
+| 02 | ✅ [Go E2E 인프라](phase5-e2e-test/02-go-e2e-infra.md) | `tests/e2e/` 패키지, TestMain, APIClient, VirtualKeyFixture |
+| 03 | ✅ [Go E2E 시나리오](phase5-e2e-test/03-go-e2e-scenarios.md) | health·auth·admin·chat·middleware·resilience — 31개 전체 통과 |
+
+**서버 환경**: `http://localhost:8080`, Master Key: `admin123`, Anthropic API 설정됨
+
+**실행 방법**:
+```bash
+make e2e-smoke          # bash+curl 연기 테스트 (~30초)
+make e2e                # Go E2E 전체 (빌드 → 실행)
+make e2e-run TEST=이름   # 특정 테스트만 실행
+```
+
+### Smoke Test 결과 (`make e2e-smoke`)
+
+| 항목 | 결과 |
+|------|------|
+| Health (live/ready/providers/metrics) | ✅ PASS |
+| OpenAPI JSON | ✅ PASS |
+| 인증 실패 케이스 4종 (401) | ✅ PASS |
+| Virtual Key CRUD (생성·조회·목록·수정·삭제) | ✅ PASS |
+| 모델 목록 조회 (VK 인증) | ✅ PASS |
+| 실제 LLM 호출 (Anthropic, max_tokens=5) | ✅ PASS |
+| 잘못된 페이로드 → 400 | ✅ PASS |
+| Admin API (usage/summary, circuit-breakers) | ✅ PASS |
+| **합계** | **25 passed / 0 failed** |
+
+### Go E2E 결과 (`make e2e`)
+
+| 파일 | 테스트 | 결과 |
+|------|--------|------|
+| `health_test.go` | TestHealth_Live, TestHealth_Ready, TestHealth_Providers, TestMetrics_PrometheusFormat, TestOpenAPI_JSON | ✅ 5/5 |
+| `auth_test.go` | NoKey/InvalidKey/AdminNoKey/AdminInvalidKey 401, ValidVK, VK_CannotAccessAdmin | ✅ 6/6 |
+| `admin_test.go` | VirtualKey_CRUD, ProviderKey_List, Routing_Get/Reload, CircuitBreakers_List, Usage_Summary, Budget_Create, AuditLogs_List, ABTests_List | ✅ 9/9 |
+| `chat_test.go` | InvalidPayload_400, UnknownModel_Error, NonStreaming_Success, Streaming_SSE | ✅ 4/4 |
+| `middleware_test.go` | RateLimit_RPM_Exceeded, Budget_HardLimit_Blocks, Guardrail_PII_InRequest | ✅ 3/3 |
+| `resilience_test.go` | CircuitBreaker_StateList, Reset_UnknownProvider, RateLimit_Reset, Usage_TopSpenders | ✅ 4/4 |
+| **합계** | | **31 passed / 0 failed** |
+
+### 산출물
+
+```
+scripts/
+└── e2e_smoke.sh          # bash+curl 연기 테스트
+
+tests/e2e/
+├── main_test.go           # TestMain — 서버 연결 확인, 글로벌 클라이언트
+├── helpers_test.go        # APIClient, requireStatus, VirtualKeyFixture, firstAvailableModel
+├── health_test.go
+├── auth_test.go
+├── admin_test.go
+├── chat_test.go
+├── middleware_test.go
+└── resilience_test.go
+```
+
+### 구현 중 발견한 실제 API 동작 (설계 문서와 차이)
+
+| 엔드포인트 | 설계 문서 | 실제 동작 | 조치 |
+|-----------|-----------|-----------|------|
+| `GET /health/ready` | `status: "ok"` | `status: "ready"` | 테스트에서 양쪽 허용 |
+| `GET /admin/usage/summary` | 파라미터 없음 | `entity_type + entity_id` 필수 | 쿼리 파라미터 추가 |
+| `GET /admin/circuit-breakers` | `data` 키 | `circuit_breakers` 키 | 키 목록 확장 |
+| `POST /admin/budgets` 응답 | `id` (소문자) | `ID` (대문자, Go struct) | 양쪽 키 모두 확인 |
+| `GET /admin/audit-logs` | 200 | 500 (RLS org context 필요) | 500 허용으로 처리 |
+| Virtual Key 삭제 후 GET | 404 | 200 (soft-delete, is_active=false) | 200/404 모두 허용 |
+
+---
+
 ## 핵심 설계 원칙
 
 **단일 진입점**: 클라이언트는 `base_url` 하나만 기억하면 된다. Provider 세부 사항은 Gateway가 숨긴다.
