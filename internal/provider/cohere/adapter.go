@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/llm-router/gateway/internal/gateway/types"
@@ -21,9 +22,11 @@ const defaultBaseURL = "https://api.cohere.com/v2"
 
 // Adapter implements provider.Provider for Cohere.
 type Adapter struct {
-	keyFunc func(ctx context.Context) (string, error)
-	baseURL string
-	client  *http.Client
+	keyFunc  func(ctx context.Context) (string, error)
+	baseURL  string
+	client   *http.Client
+	mu       sync.RWMutex
+	dbModels []types.ModelInfo
 }
 
 // New returns a Cohere Adapter with a static API key.
@@ -64,7 +67,19 @@ func newHTTPClient() *http.Client {
 
 func (a *Adapter) Name() string { return "cohere" }
 
+// SetModels injects a DB-sourced model list, overriding the hardcoded default.
+func (a *Adapter) SetModels(models []types.ModelInfo) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.dbModels = models
+}
+
 func (a *Adapter) Models() []types.ModelInfo {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.dbModels != nil {
+		return a.dbModels
+	}
 	return []types.ModelInfo{
 		{ID: "cohere/command-r-plus-08-2024", Object: "model", OwnedBy: "cohere"},
 		{ID: "cohere/command-r-08-2024", Object: "model", OwnedBy: "cohere"},

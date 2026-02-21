@@ -6,6 +6,7 @@ import { clsx } from "clsx";
 
 const nav = [
   { href: "/", label: "Dashboard" },
+  { href: "/playground", label: "Playground" },
   { href: "/keys", label: "Virtual Keys" },
   { href: "/providers", label: "Providers" },
   { href: "/usage", label: "Usage" },

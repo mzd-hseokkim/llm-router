@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/llm-router/gateway/internal/gateway/types"
@@ -20,9 +21,11 @@ const (
 
 // Adapter implements provider.Provider for Anthropic Claude.
 type Adapter struct {
-	keyFunc func(ctx context.Context) (string, error)
-	baseURL string
-	client  *http.Client
+	keyFunc  func(ctx context.Context) (string, error)
+	baseURL  string
+	client   *http.Client
+	mu       sync.RWMutex
+	dbModels []types.ModelInfo
 }
 
 // New returns an Anthropic Adapter with a static API key.
@@ -67,7 +70,19 @@ func newHTTPClient() *http.Client {
 
 func (a *Adapter) Name() string { return "anthropic" }
 
+// SetModels injects a DB-sourced model list, overriding the hardcoded default.
+func (a *Adapter) SetModels(models []types.ModelInfo) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.dbModels = models
+}
+
 func (a *Adapter) Models() []types.ModelInfo {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.dbModels != nil {
+		return a.dbModels
+	}
 	return []types.ModelInfo{
 		{ID: "anthropic/claude-sonnet-4-6", Object: "model", OwnedBy: "anthropic"},
 		{ID: "anthropic/claude-haiku-4-5-20251001", Object: "model", OwnedBy: "anthropic"},

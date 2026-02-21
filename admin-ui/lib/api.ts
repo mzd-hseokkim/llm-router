@@ -106,6 +106,76 @@ export interface TopSpender {
   cost_usd: number;
 }
 
+export interface Provider {
+  id: string;
+  name: string;
+  adapter_type: string;
+  display_name: string;
+  base_url?: string;
+  is_enabled: boolean;
+  config_json?: Record<string, unknown>;
+  sort_order: number;
+  model_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateProviderPayload {
+  name: string;
+  adapter_type: string;
+  display_name?: string;
+  base_url?: string;
+  is_enabled?: boolean;
+  config_json?: Record<string, unknown>;
+  sort_order?: number;
+}
+
+export interface UpdateProviderPayload {
+  display_name?: string;
+  base_url?: string;
+  is_enabled?: boolean;
+  config_json?: Record<string, unknown>;
+  sort_order?: number;
+}
+
+export interface Model {
+  id: string;
+  provider_id: string;
+  model_id: string;
+  model_name: string;
+  display_name?: string;
+  is_enabled: boolean;
+  input_per_million_tokens: number;
+  output_per_million_tokens: number;
+  context_window?: number;
+  max_output_tokens?: number;
+  supports_streaming: boolean;
+  supports_tools: boolean;
+  supports_vision: boolean;
+  tags?: string[];
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateModelPayload {
+  model_id: string;
+  model_name: string;
+  display_name?: string;
+  is_enabled?: boolean;
+  input_per_million_tokens?: number;
+  output_per_million_tokens?: number;
+  context_window?: number;
+  max_output_tokens?: number;
+  supports_streaming?: boolean;
+  supports_tools?: boolean;
+  supports_vision?: boolean;
+  tags?: string[];
+  sort_order?: number;
+}
+
+export type UpdateModelPayload = Partial<CreateModelPayload>;
+
 export interface Organization {
   id: string;
   name: string;
@@ -142,6 +212,42 @@ export const keys = {
     apiFetch<{ key: string } & VirtualKey>(`/keys/${id}/regenerate`, { method: "POST" }),
 };
 
+// --- Providers ---
+
+export const providers = {
+  list: () =>
+    apiFetch<{ data: Provider[] }>("/providers").then((r) => r.data),
+  get: (id: string) => apiFetch<Provider>(`/providers/${id}`),
+  create: (payload: CreateProviderPayload) =>
+    apiFetch<Provider>("/providers", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  update: (id: string, payload: UpdateProviderPayload) =>
+    apiFetch<Provider>(`/providers/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  delete: (id: string) =>
+    fetch(`${BASE}/providers/${id}`, { method: "DELETE" }),
+  models: {
+    list: (providerId: string) =>
+      apiFetch<{ data: Model[] }>(`/providers/${providerId}/models`).then((r) => r.data),
+    create: (providerId: string, payload: CreateModelPayload) =>
+      apiFetch<Model>(`/providers/${providerId}/models`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    update: (providerId: string, modelId: string, payload: UpdateModelPayload) =>
+      apiFetch<Model>(`/providers/${providerId}/models/${modelId}`, {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      }),
+    delete: (providerId: string, modelId: string) =>
+      fetch(`${BASE}/providers/${providerId}/models/${modelId}`, { method: "DELETE" }),
+  },
+};
+
 // --- Provider Keys ---
 
 export const providerKeys = {
@@ -149,6 +255,39 @@ export const providerKeys = {
     apiFetch<{ data: ProviderKey[] }>(
       `/provider-keys${provider ? `?provider=${provider}` : ""}`
     ).then((r) => r.data),
+  get: (id: string) => apiFetch<ProviderKey>(`/provider-keys/${id}`),
+  create: (payload: {
+    provider: string;
+    key_alias: string;
+    api_key: string;
+    group_name?: string;
+    tags?: string[];
+    weight?: number;
+    is_active?: boolean;
+  }) =>
+    apiFetch<ProviderKey>("/provider-keys", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  update: (id: string, payload: Partial<{
+    key_alias: string;
+    group_name: string;
+    tags: string[];
+    weight: number;
+    is_active: boolean;
+    monthly_budget_usd: number;
+  }>) =>
+    apiFetch<ProviderKey>(`/provider-keys/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  delete: (id: string) =>
+    fetch(`${BASE}/provider-keys/${id}`, { method: "DELETE" }),
+  rotate: (id: string, newApiKey: string) =>
+    apiFetch<ProviderKey>(`/provider-keys/${id}/rotate`, {
+      method: "PUT",
+      body: JSON.stringify({ new_api_key: newApiKey }),
+    }),
 };
 
 // --- Logs ---

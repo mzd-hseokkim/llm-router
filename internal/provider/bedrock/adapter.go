@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/llm-router/gateway/internal/gateway/types"
@@ -34,10 +35,12 @@ type Config struct {
 
 // Adapter implements provider.Provider for AWS Bedrock.
 type Adapter struct {
-	region  string
-	auth    AuthConfig
-	baseURL string
-	client  *http.Client
+	region   string
+	auth     AuthConfig
+	baseURL  string
+	client   *http.Client
+	mu       sync.RWMutex
+	dbModels []types.ModelInfo
 }
 
 // New returns a Bedrock Adapter with the given config.
@@ -66,7 +69,19 @@ func newHTTPClient() *http.Client {
 
 func (a *Adapter) Name() string { return "bedrock" }
 
+// SetModels injects a DB-sourced model list, overriding the hardcoded default.
+func (a *Adapter) SetModels(models []types.ModelInfo) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.dbModels = models
+}
+
 func (a *Adapter) Models() []types.ModelInfo {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.dbModels != nil {
+		return a.dbModels
+	}
 	return []types.ModelInfo{
 		{ID: "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0", Object: "model", OwnedBy: "bedrock"},
 		{ID: "bedrock/anthropic.claude-3-5-haiku-20241022-v1:0", Object: "model", OwnedBy: "bedrock"},

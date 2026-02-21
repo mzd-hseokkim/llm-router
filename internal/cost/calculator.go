@@ -59,6 +59,14 @@ func (c *Calculator) Calculate(model string, promptTokens, completionTokens int)
 	return in + out
 }
 
+// UpdatePricing merges the given pricing entries into the calculator's table.
+// Existing entries are overwritten; DB entries take precedence over YAML defaults.
+func (c *Calculator) UpdatePricing(pricing map[string]ModelPricing) {
+	for k, v := range pricing {
+		c.models[strings.ToLower(k)] = v
+	}
+}
+
 // HasPricing reports whether the model has a known price.
 func (c *Calculator) HasPricing(model string) bool {
 	_, ok := c.lookup(model)

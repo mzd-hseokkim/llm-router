@@ -19,7 +19,11 @@ export function middleware(request: NextRequest) {
   }
 
   // Protect all admin pages — redirect to /login if not authenticated.
+  // API routes get a 401 instead of a redirect.
   if (!session?.value) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
     return NextResponse.redirect(new URL("/login", request.url));
   }
 

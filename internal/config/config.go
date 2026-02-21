@@ -146,6 +146,7 @@ type ProvidersConfig struct {
 	OpenAI     ProviderConfig          `koanf:"openai"`
 	Anthropic  ProviderConfig          `koanf:"anthropic"`
 	Gemini     ProviderConfig          `koanf:"gemini"`
+	Grok       ProviderConfig          `koanf:"grok"`
 	Azure      AzureProviderConfig     `koanf:"azure"`
 	Mistral    ProviderConfig          `koanf:"mistral"`
 	Cohere     ProviderConfig          `koanf:"cohere"`

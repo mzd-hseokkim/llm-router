@@ -50,6 +50,7 @@ import (
 	providerbedrock "github.com/llm-router/gateway/internal/provider/bedrock"
 	providercohere "github.com/llm-router/gateway/internal/provider/cohere"
 	providergemini "github.com/llm-router/gateway/internal/provider/gemini"
+	providergrok "github.com/llm-router/gateway/internal/provider/grok"
 	providermistral "github.com/llm-router/gateway/internal/provider/mistral"
 	provideropenai "github.com/llm-router/gateway/internal/provider/openai"
 	providerselfhosted "github.com/llm-router/gateway/internal/provider/selfhosted"
@@ -269,13 +270,16 @@ func main() {
 	// /metrics — Prometheus metrics
 	r.Handle("/metrics", promhttp.Handler())
 
+	// Sync providers/models from DB into registry and pricing table (best-effort).
+	syncProvidersFromDB(context.Background(), pool, registry, costCalc, logger)
+
 	// /admin/* — protected by master key
 	orgStore := pgstore.NewOrgStore(pool)
 	roleStore := pgstore.NewRoleStore(pool)
 	registerAdminRoutes(r, keyStore, keyCache, km, cipher, pool, logStore, cb, cfg, logger,
 		rateLimiter, budgetMgr, budgetStore, routingStore, orgStore, roleStore, ec, ruleStore, advRouter,
 		auditLogger, auditStore, alertRouter, promptStore, promptSvc,
-		abTestStore, abTestMw, billingStore, chargebackSvc, residencyEnforcer, buildResidencyRegistry(cfg))
+		abTestStore, abTestMw, billingStore, chargebackSvc, residencyEnforcer, buildResidencyRegistry(cfg), fr, costCalc, registry)
 
 	// /auth/* — OAuth / SSO endpoints
 	oauthProviders := buildOAuthProviders(cfg)
@@ -307,6 +311,10 @@ func buildRegistry(km *provider.KeyManager, cfg *config.Config) *provider.Regist
 	registry.Register(provideropenai.NewManaged(km, cfg.Providers.OpenAI.BaseURL))
 	registry.Register(provideranthropic.NewManaged(km, cfg.Providers.Anthropic.BaseURL))
 	registry.Register(providergemini.NewManaged(km, cfg.Providers.Gemini.BaseURL))
+
+	if cfg.Providers.Grok.APIKey != "" || cfg.Providers.Grok.BaseURL != "" {
+		registry.Register(providergrok.NewManaged(km, cfg.Providers.Grok.BaseURL))
+	}
 
 	if cfg.Providers.Mistral.APIKey != "" || cfg.Providers.Mistral.BaseURL != "" {
 		registry.Register(providermistral.NewManaged(km, cfg.Providers.Mistral.BaseURL))
@@ -389,6 +397,7 @@ func buildKeyManager(pool *pgxpool.Pool, cfg *config.Config, logger *slog.Logger
 		"openai":    cfg.Providers.OpenAI.APIKey,
 		"anthropic": cfg.Providers.Anthropic.APIKey,
 		"gemini":    cfg.Providers.Gemini.APIKey,
+		"grok":      cfg.Providers.Grok.APIKey,
 		"mistral":   cfg.Providers.Mistral.APIKey,
 		"cohere":    cfg.Providers.Cohere.APIKey,
 		"azure":     cfg.Providers.Azure.APIKey,
@@ -449,6 +458,9 @@ func registerAdminRoutes(
 	chargebackSvc *billing.ChargebackService,
 	residencyEnforcer *residency.Enforcer,
 	residencyRegistry *residency.Registry,
+	fr *fallback.Router,
+	costCalc *cost.Calculator,
+	registry *provider.Registry,
 ) {
 	adminMw := auth.AdminAuth(cfg.Gateway.MasterKey)
 
@@ -612,6 +624,24 @@ func registerAdminRoutes(
 			r.Get("/admin/data-residency/report", drHandler.Report)
 		}
 
+		// Provider and model management
+		provStore := pgstore.NewProviderStore(pool)
+		modelStore := pgstore.NewModelStore(pool)
+		providersHandler := handler.NewAdminProvidersHandler(provStore, modelStore, registry, costCalc, logger)
+		r.Get("/admin/providers", providersHandler.ListProviders)
+		r.Post("/admin/providers", providersHandler.CreateProvider)
+		r.Get("/admin/providers/{id}", providersHandler.GetProvider)
+		r.Put("/admin/providers/{id}", providersHandler.UpdateProvider)
+		r.Delete("/admin/providers/{id}", providersHandler.DeleteProvider)
+		r.Get("/admin/providers/{id}/models", providersHandler.ListModels)
+		r.Post("/admin/providers/{id}/models", providersHandler.CreateModel)
+		r.Put("/admin/providers/{id}/models/{modelId}", providersHandler.UpdateModel)
+		r.Delete("/admin/providers/{id}/models/{modelId}", providersHandler.DeleteModel)
+
+		// Admin playground (master key auth; no virtual key required)
+		playgroundHandler := handler.NewAdminPlaygroundHandler(fr, store, costCalc, logger)
+		r.Post("/admin/playground", playgroundHandler.Chat)
+
 		// OpenAPI spec
 		openAPIHandler := handler.NewAdminOpenAPIHandler()
 		r.Get("/admin/openapi.json", openAPIHandler.Spec)
@@ -660,6 +690,9 @@ func applyEnvKeys(cfg *config.Config) {
 	}
 	if v := os.Getenv("GEMINI_API_KEY"); v != "" {
 		cfg.Providers.Gemini.APIKey = v
+	}
+	if v := os.Getenv("GROK_API_KEY"); v != "" {
+		cfg.Providers.Grok.APIKey = v
 	}
 	if v := os.Getenv("MISTRAL_API_KEY"); v != "" {
 		cfg.Providers.Mistral.APIKey = v
@@ -936,6 +969,62 @@ func buildResidencyEnforcer(cfg *config.Config) *residency.Enforcer {
 		return nil
 	}
 	return residency.NewEnforcer(registry)
+}
+
+// syncProvidersFromDB loads enabled providers and models from DB into the
+// registry and pricing table. If the DB is empty, the existing config and
+// hardcoded defaults remain unchanged (no-op for fresh installs).
+func syncProvidersFromDB(ctx context.Context, pool *pgxpool.Pool, reg *provider.Registry, calc *cost.Calculator, logger *slog.Logger) {
+	provStore := pgstore.NewProviderStore(pool)
+	modelStore := pgstore.NewModelStore(pool)
+
+	provs, err := provStore.List(ctx)
+	if err != nil {
+		logger.Warn("syncProvidersFromDB: failed to list providers; using defaults", "error", err)
+		return
+	}
+	if len(provs) == 0 {
+		return // empty DB — keep existing defaults
+	}
+
+	pricing := make(map[string]cost.ModelPricing)
+	for _, p := range provs {
+		if !p.IsEnabled {
+			continue
+		}
+		models, err := modelStore.ListByProvider(ctx, p.ID)
+		if err != nil {
+			logger.Warn("syncProvidersFromDB: failed to list models", "provider", p.Name, "error", err)
+			continue
+		}
+
+		modelInfos := make([]types.ModelInfo, 0, len(models))
+		for _, m := range models {
+			if !m.IsEnabled {
+				continue
+			}
+			modelInfos = append(modelInfos, types.ModelInfo{
+				ID:      m.ModelID,
+				Object:  "model",
+				OwnedBy: p.Name,
+			})
+			pricing[m.ModelID] = cost.ModelPricing{
+				Provider:               p.Name,
+				InputPerMillionTokens:  m.InputPerMillionTokens,
+				OutputPerMillionTokens: m.OutputPerMillionTokens,
+			}
+		}
+
+		if ok := reg.SetProviderModels(p.Name, modelInfos); !ok {
+			logger.Warn("syncProvidersFromDB: provider not found in registry (name mismatch?)",
+				"db_provider_name", p.Name)
+		}
+	}
+
+	if len(pricing) > 0 {
+		calc.UpdatePricing(pricing)
+	}
+	logger.Info("syncProvidersFromDB: loaded providers from DB", "count", len(provs))
 }
 
 func setupLogger(cfg config.LogConfig) *slog.Logger {

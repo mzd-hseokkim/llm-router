@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/llm-router/gateway/internal/gateway/types"
@@ -23,6 +24,8 @@ type Adapter struct {
 	apiVersion  string
 	client      *http.Client
 	deployments []deployment
+	mu          sync.RWMutex
+	dbModels    []types.ModelInfo
 }
 
 type deployment struct {
@@ -98,7 +101,19 @@ func newHTTPClient() *http.Client {
 
 func (a *Adapter) Name() string { return "azure" }
 
+// SetModels injects a DB-sourced model list, overriding the deployment-derived default.
+func (a *Adapter) SetModels(models []types.ModelInfo) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.dbModels = models
+}
+
 func (a *Adapter) Models() []types.ModelInfo {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.dbModels != nil {
+		return a.dbModels
+	}
 	models := make([]types.ModelInfo, 0, len(a.deployments))
 	for _, d := range a.deployments {
 		models = append(models, types.ModelInfo{

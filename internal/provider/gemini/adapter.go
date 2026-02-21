@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/llm-router/gateway/internal/gateway/types"
@@ -17,9 +18,11 @@ const defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 
 // Adapter implements provider.Provider for Google Gemini.
 type Adapter struct {
-	keyFunc func(ctx context.Context) (string, error)
-	baseURL string
-	client  *http.Client
+	keyFunc  func(ctx context.Context) (string, error)
+	baseURL  string
+	client   *http.Client
+	mu       sync.RWMutex
+	dbModels []types.ModelInfo
 }
 
 // New returns a Gemini Adapter with a static API key.
@@ -64,7 +67,19 @@ func newHTTPClient() *http.Client {
 
 func (a *Adapter) Name() string { return "google" }
 
+// SetModels injects a DB-sourced model list, overriding the hardcoded default.
+func (a *Adapter) SetModels(models []types.ModelInfo) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.dbModels = models
+}
+
 func (a *Adapter) Models() []types.ModelInfo {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.dbModels != nil {
+		return a.dbModels
+	}
 	return []types.ModelInfo{
 		{ID: "google/gemini-2.0-flash", Object: "model", OwnedBy: "google"},
 		{ID: "google/gemini-2.0-pro", Object: "model", OwnedBy: "google"},

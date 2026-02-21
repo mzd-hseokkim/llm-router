@@ -1,6 +1,6 @@
-// Package mistral implements a provider adapter for Mistral AI.
-// Mistral uses an OpenAI-compatible API format.
-package mistral
+// Package grok implements a provider adapter for xAI Grok.
+// xAI uses an OpenAI-compatible API format.
+package grok
 
 import (
 	"bytes"
@@ -18,9 +18,9 @@ import (
 	"github.com/llm-router/gateway/internal/provider"
 )
 
-const defaultBaseURL = "https://api.mistral.ai/v1"
+const defaultBaseURL = "https://api.x.ai/v1"
 
-// Adapter implements provider.Provider for Mistral AI.
+// Adapter implements provider.Provider for xAI Grok.
 type Adapter struct {
 	keyFunc  func(ctx context.Context) (string, error)
 	baseURL  string
@@ -29,15 +29,15 @@ type Adapter struct {
 	dbModels []types.ModelInfo
 }
 
-// New returns a Mistral Adapter with a static API key.
+// New returns a Grok Adapter with a static API key.
 func New(apiKey, baseURL string) *Adapter {
 	return newAdapter(func(_ context.Context) (string, error) { return apiKey, nil }, baseURL)
 }
 
-// NewManaged returns a Mistral Adapter that resolves its API key from km at request time.
+// NewManaged returns a Grok Adapter that resolves its API key from km at request time.
 func NewManaged(km provider.KeyProvider, baseURL string) *Adapter {
 	return newAdapter(func(ctx context.Context) (string, error) {
-		return km.SelectKey(ctx, "mistral", "")
+		return km.SelectKey(ctx, "grok", "")
 	}, baseURL)
 }
 
@@ -65,7 +65,7 @@ func newHTTPClient() *http.Client {
 	}
 }
 
-func (a *Adapter) Name() string { return "mistral" }
+func (a *Adapter) Name() string { return "grok" }
 
 // SetModels injects a DB-sourced model list, overriding the hardcoded default.
 func (a *Adapter) SetModels(models []types.ModelInfo) {
@@ -81,29 +81,29 @@ func (a *Adapter) Models() []types.ModelInfo {
 		return a.dbModels
 	}
 	return []types.ModelInfo{
-		{ID: "mistral/mistral-large-latest", Object: "model", OwnedBy: "mistral"},
-		{ID: "mistral/mistral-small-latest", Object: "model", OwnedBy: "mistral"},
-		{ID: "mistral/codestral-latest", Object: "model", OwnedBy: "mistral"},
-		{ID: "mistral/mistral-embed", Object: "model", OwnedBy: "mistral"},
+		{ID: "grok/grok-3", Object: "model", OwnedBy: "xai"},
+		{ID: "grok/grok-3-mini", Object: "model", OwnedBy: "xai"},
+		{ID: "grok/grok-2-1212", Object: "model", OwnedBy: "xai"},
+		{ID: "grok/grok-2-vision-1212", Object: "model", OwnedBy: "xai"},
 	}
 }
 
-// ChatCompletion sends a chat completion request to Mistral.
+// ChatCompletion sends a chat completion request to xAI Grok.
 func (a *Adapter) ChatCompletion(ctx context.Context, model string, req *types.ChatCompletionRequest, rawBody []byte) (*types.ChatCompletionResponse, error) {
 	apiKey, err := a.keyFunc(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("resolve mistral api key: %w", err)
+		return nil, fmt.Errorf("resolve grok api key: %w", err)
 	}
 
 	body, err := buildRequest(model, rawBody)
 	if err != nil {
-		return nil, fmt.Errorf("build mistral request: %w", err)
+		return nil, fmt.Errorf("build grok request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		a.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("create mistral request: %w", err)
+		return nil, fmt.Errorf("create grok request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
@@ -116,32 +116,32 @@ func (a *Adapter) ChatCompletion(ctx context.Context, model string, req *types.C
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read mistral response: %w", err)
+		return nil, fmt.Errorf("read grok response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, provider.NormalizeHTTPError(resp.StatusCode, string(respBody), resp.Header)
 	}
 
-	return parseResponse("mistral/"+model, respBody)
+	return parseResponse("grok/"+model, respBody)
 }
 
-// ChatCompletionStream initiates a streaming request to Mistral.
+// ChatCompletionStream initiates a streaming request to xAI Grok.
 func (a *Adapter) ChatCompletionStream(ctx context.Context, model string, req *types.ChatCompletionRequest, rawBody []byte) (<-chan provider.StreamChunk, error) {
 	apiKey, err := a.keyFunc(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("resolve mistral api key: %w", err)
+		return nil, fmt.Errorf("resolve grok api key: %w", err)
 	}
 
 	body, err := buildStreamRequest(model, rawBody)
 	if err != nil {
-		return nil, fmt.Errorf("build mistral stream request: %w", err)
+		return nil, fmt.Errorf("build grok stream request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		a.baseURL+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("create mistral stream request: %w", err)
+		return nil, fmt.Errorf("create grok stream request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
@@ -158,7 +158,7 @@ func (a *Adapter) ChatCompletionStream(ctx context.Context, model string, req *t
 		return nil, provider.NormalizeHTTPError(resp.StatusCode, string(body), resp.Header)
 	}
 
-	return streamMistralSSE(ctx, resp.Body, "mistral/"+model), nil
+	return streamGrokSSE(ctx, resp.Body, "grok/"+model), nil
 }
 
 // buildRequest replaces the model field with the stripped model name.
@@ -187,14 +187,14 @@ func buildStreamRequest(model string, rawBody []byte) ([]byte, error) {
 func parseResponse(originalModel string, respBody []byte) (*types.ChatCompletionResponse, error) {
 	var resp types.ChatCompletionResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
-		return nil, fmt.Errorf("unmarshal mistral response: %w", err)
+		return nil, fmt.Errorf("unmarshal grok response: %w", err)
 	}
 	resp.Model = originalModel
 	return &resp, nil
 }
 
-// streamMistralSSE reads Mistral's SSE stream (OpenAI-compatible format).
-func streamMistralSSE(ctx context.Context, body io.ReadCloser, model string) <-chan provider.StreamChunk {
+// streamGrokSSE reads xAI's SSE stream (OpenAI-compatible format).
+func streamGrokSSE(ctx context.Context, body io.ReadCloser, model string) <-chan provider.StreamChunk {
 	ch := make(chan provider.StreamChunk, 16)
 	go func() {
 		defer close(ch)
@@ -213,7 +213,7 @@ func streamMistralSSE(ctx context.Context, body io.ReadCloser, model string) <-c
 			n, err := body.Read(buf)
 			if n > 0 {
 				leftover = append(leftover, buf[:n]...)
-				leftover = parseMistralLines(ctx, ch, leftover)
+				leftover = parseGrokLines(ctx, ch, leftover)
 			}
 			if err != nil {
 				return
@@ -223,7 +223,7 @@ func streamMistralSSE(ctx context.Context, body io.ReadCloser, model string) <-c
 	return ch
 }
 
-func parseMistralLines(ctx context.Context, ch chan<- provider.StreamChunk, buf []byte) []byte {
+func parseGrokLines(ctx context.Context, ch chan<- provider.StreamChunk, buf []byte) []byte {
 	for {
 		idx := strings.IndexByte(string(buf), '\n')
 		if idx < 0 {

@@ -73,6 +73,19 @@ func (sr *statusRecorder) status() int {
 	return sr.code
 }
 
+// Flush implements http.Flusher so SSE streaming works through this wrapper.
+func (sr *statusRecorder) Flush() {
+	if f, ok := sr.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap exposes the underlying ResponseWriter so http.ResponseController
+// (used in proxy/stream.go for SetWriteDeadline) can reach it.
+func (sr *statusRecorder) Unwrap() http.ResponseWriter {
+	return sr.ResponseWriter
+}
+
 // Middleware returns an HTTP middleware that records admin-API calls to the audit log.
 func Middleware(auditLog *Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {

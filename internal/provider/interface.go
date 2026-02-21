@@ -30,6 +30,11 @@ type Provider interface {
 	ChatCompletionStream(ctx context.Context, model string, req *types.ChatCompletionRequest, rawBody []byte) (<-chan StreamChunk, error)
 }
 
+// ModelOverridable is implemented by adapters that support DB-injected model lists.
+type ModelOverridable interface {
+	SetModels(models []types.ModelInfo)
+}
+
 // Registry manages registered providers and supports lookup by name.
 type Registry struct {
 	providers map[string]Provider
@@ -58,6 +63,21 @@ func (r *Registry) AllModels() []types.ModelInfo {
 		models = append(models, p.Models()...)
 	}
 	return models
+}
+
+// SetProviderModels injects a DB-sourced model list into the named provider.
+// Returns false if the provider is not found or does not implement ModelOverridable.
+func (r *Registry) SetProviderModels(name string, models []types.ModelInfo) bool {
+	p, ok := r.providers[name]
+	if !ok {
+		return false
+	}
+	mo, ok := p.(ModelOverridable)
+	if !ok {
+		return false
+	}
+	mo.SetModels(models)
+	return true
 }
 
 // AllProviders returns the names of all registered providers.
