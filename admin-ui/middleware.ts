@@ -7,13 +7,6 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const session = request.cookies.get(SESSION_COOKIE);
 
-  // Protect dashboard routes — redirect to /login if not authenticated.
-  if (pathname.startsWith("/dashboard")) {
-    if (!session?.value) {
-      return NextResponse.redirect(new URL("/login", request.url));
-    }
-  }
-
   // Protect /api/admin/* — inject Authorization header from httpOnly cookie
   // so the Next.js rewrite forwards it to the Go gateway.
   if (pathname.startsWith("/api/admin")) {
@@ -25,9 +18,17 @@ export function middleware(request: NextRequest) {
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
+  // Protect all admin pages — redirect to /login if not authenticated.
+  if (!session?.value) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/api/admin/:path*"],
+  // Match all routes except /login, /api/auth/*, and Next.js internals.
+  matcher: [
+    "/((?!login|api/auth|_next/static|_next/image|favicon.ico).*)",
+  ],
 };

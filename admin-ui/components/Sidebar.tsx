@@ -5,11 +5,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { clsx } from "clsx";
 
 const nav = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/dashboard/keys", label: "Virtual Keys" },
-  { href: "/dashboard/providers", label: "Providers" },
-  { href: "/dashboard/usage", label: "Usage" },
-  { href: "/dashboard/logs", label: "Logs" },
+  { href: "/", label: "Dashboard" },
+  { href: "/keys", label: "Virtual Keys" },
+  { href: "/providers", label: "Providers" },
+  { href: "/usage", label: "Usage" },
+  { href: "/logs", label: "Logs" },
 ];
 
 export default function Sidebar() {

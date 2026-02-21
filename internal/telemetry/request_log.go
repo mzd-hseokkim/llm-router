@@ -9,27 +9,27 @@ import (
 
 // LogEntry holds all metadata captured for a single API request.
 type LogEntry struct {
-	RequestID        string
-	Timestamp        time.Time
-	Model            string
-	Provider         string
-	VirtualKeyID     *uuid.UUID
-	UserID           *uuid.UUID
-	TeamID           *uuid.UUID
-	OrgID            *uuid.UUID
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
-	CostUSD          float64
-	LatencyMs        int64
-	TTFTMs           *int64
-	StatusCode       int
-	FinishReason     string
-	CacheHit         bool
-	IsStreaming      bool
-	ErrorCode        string
-	ErrorMessage     string
-	Metadata         map[string]any
+	RequestID        string         `json:"request_id"`
+	Timestamp        time.Time      `json:"timestamp"`
+	Model            string         `json:"model"`
+	Provider         string         `json:"provider"`
+	VirtualKeyID     *uuid.UUID     `json:"virtual_key_id,omitempty"`
+	UserID           *uuid.UUID     `json:"user_id,omitempty"`
+	TeamID           *uuid.UUID     `json:"team_id,omitempty"`
+	OrgID            *uuid.UUID     `json:"org_id,omitempty"`
+	PromptTokens     int            `json:"prompt_tokens"`
+	CompletionTokens int            `json:"completion_tokens"`
+	TotalTokens      int            `json:"total_tokens"`
+	CostUSD          float64        `json:"cost_usd"`
+	LatencyMs        int64          `json:"latency_ms"`
+	TTFTMs           *int64         `json:"ttft_ms,omitempty"`
+	StatusCode       int            `json:"status_code"`
+	FinishReason     string         `json:"finish_reason,omitempty"`
+	CacheHit         bool           `json:"cache_hit"`
+	IsStreaming      bool           `json:"is_streaming"`
+	ErrorCode        string         `json:"error_code,omitempty"`
+	ErrorMessage     string         `json:"error_message,omitempty"`
+	Metadata         map[string]any `json:"metadata,omitempty"`
 }
 
 // requestLogCtxKey is the private context key for RequestLogContext.

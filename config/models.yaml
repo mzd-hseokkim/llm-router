@@ -51,7 +51,17 @@ models:
     input_per_million_tokens: 3.00
     output_per_million_tokens: 15.00
 
+  claude-sonnet-4-6:
+    provider: anthropic
+    input_per_million_tokens: 3.00
+    output_per_million_tokens: 15.00
+
   claude-haiku-4-5-20251001:
+    provider: anthropic
+    input_per_million_tokens: 0.80
+    output_per_million_tokens: 4.00
+
+  claude-haiku-4-6:
     provider: anthropic
     input_per_million_tokens: 0.80
     output_per_million_tokens: 4.00

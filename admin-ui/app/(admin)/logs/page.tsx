@@ -77,9 +77,9 @@ export default function LogsPage() {
                 </td>
               </tr>
             ) : (
-              logList.map((entry: LogEntry) => (
+              logList.map((entry: LogEntry, i) => (
                 <tr
-                  key={entry.request_id}
+                  key={entry.request_id ?? i}
                   className="hover:bg-slate-50 cursor-pointer"
                   onClick={() => setSelected(entry)}
                 >
@@ -91,9 +91,9 @@ export default function LogsPage() {
                   </td>
                   <td className="px-4 py-2.5 text-slate-500">{entry.provider}</td>
                   <td className="px-4 py-2.5 text-slate-500">
-                    {entry.total_tokens.toLocaleString()}
+                    {(entry.total_tokens ?? 0).toLocaleString()}
                   </td>
-                  <td className="px-4 py-2.5 text-slate-500">${entry.cost_usd.toFixed(5)}</td>
+                  <td className="px-4 py-2.5 text-slate-500">${(entry.cost_usd ?? 0).toFixed(5)}</td>
                   <td className="px-4 py-2.5 text-slate-500">{entry.latency_ms}ms</td>
                   <td className="px-4 py-2.5">
                     <StatusBadge code={entry.status_code} />
@@ -126,10 +126,10 @@ export default function LogsPage() {
                 ["Provider", selected.provider],
                 ["Status", selected.status_code],
                 ["Latency", `${selected.latency_ms}ms`],
-                ["Prompt Tokens", selected.prompt_tokens],
-                ["Completion Tokens", selected.completion_tokens],
-                ["Total Tokens", selected.total_tokens],
-                ["Cost", `$${selected.cost_usd.toFixed(6)}`],
+                ["Prompt Tokens", selected.prompt_tokens ?? 0],
+                ["Completion Tokens", selected.completion_tokens ?? 0],
+                ["Total Tokens", selected.total_tokens ?? 0],
+                ["Cost", `$${(selected.cost_usd ?? 0).toFixed(6)}`],
                 ["Streaming", selected.is_streaming ? "Yes" : "No"],
                 ["Finish Reason", selected.finish_reason || "—"],
                 ["Error Code", selected.error_code || "—"],
