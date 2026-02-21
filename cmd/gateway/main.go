@@ -25,7 +25,6 @@ import (
 	"github.com/llm-router/gateway/internal/auth/session"
 	"github.com/llm-router/gateway/internal/budget"
 	exactcache "github.com/llm-router/gateway/internal/cache/exact"
-	semanticcache "github.com/llm-router/gateway/internal/cache/semantic"
 	"github.com/llm-router/gateway/internal/config"
 	"github.com/llm-router/gateway/internal/cost"
 	"github.com/llm-router/gateway/internal/crypto"
@@ -168,27 +167,12 @@ func main() {
 	// --- Guardrails ---
 	guardrailPipeline := buildGuardrailPipeline(cfg, logger)
 
-	// --- Exact-match cache ---
+	// --- Exact-match cache (temperature=0 only) ---
 	var cacheMw *middleware.CacheMiddleware
 	var ec *exactcache.Cache
 	if cfg.Cache.ExactMatch.Enabled {
 		ec = exactcache.New(redisClient, cfg.Cache.ExactMatch.DefaultTTL, cfg.Cache.ExactMatch.MaxResponseSize)
-		cacheMw = middleware.NewCacheMiddleware(ec, cfg.Cache.ExactMatch.CacheTemperatureZeroOnly)
-
-		// --- Semantic cache (depends on exact cache + pgvector) ---
-		if cfg.Cache.Semantic.Enabled {
-			apiKey := cfg.Cache.Semantic.EmbeddingAPIKey
-			if apiKey == "" {
-				apiKey = cfg.Providers.OpenAI.APIKey
-			}
-			embedder := semanticcache.NewOpenAIEmbedder(apiKey, cfg.Cache.Semantic.EmbeddingModel, cfg.Providers.OpenAI.BaseURL)
-			vectorStore := pgstore.NewVectorStore(pool)
-			semCache := semanticcache.New(vectorStore, embedder, cfg.Cache.Semantic.Threshold, cfg.Cache.Semantic.TTL, logger)
-			cacheMw.WithSemantic(func(ctx context.Context, req *types.ChatCompletionRequest) (*types.ChatCompletionResponse, float64, error) {
-				return semCache.Lookup(ctx, req)
-			})
-			logger.Info("semantic cache enabled", "threshold", cfg.Cache.Semantic.Threshold)
-		}
+		cacheMw = middleware.NewCacheMiddleware(ec)
 		logger.Info("exact-match cache enabled", "ttl", cfg.Cache.ExactMatch.DefaultTTL)
 	}
 

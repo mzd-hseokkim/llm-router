@@ -272,9 +272,9 @@ response = client.chat.completions.<span class="c-fn">create</span>(
       </div>
       <div class="step fade-in" style="transition-delay:0.1s">
         <div class="step-num">2</div>
-        <h3 data-i18n="how.s2.title">Gateway Routes Intelligently</h3>
-        <p data-i18n="how.s2.p">ML-based routing selects the best provider per request — optimizing for cost, latency, or quality based on your rules.</p>
-        <div class="step-code"><span style="color:#79b4f7">strategy</span>: <span style="color:#8fc">cost_optimized</span><br /><span style="color:#79b4f7">fallback</span>: <span style="color:#8fc">auto</span></div>
+        <h3 data-i18n="how.s2.title">Gateway Handles Failover</h3>
+        <p data-i18n="how.s2.p">Configured fallback chains route each request to the right provider. Circuit breakers automatically skip unhealthy providers — your traffic keeps flowing.</p>
+        <div class="step-code"><span style="color:#79b4f7">fallback</span>: <span style="color:#8fc">[openai, anthropic, gemini]</span></div>
       </div>
       <div class="step fade-in" style="transition-delay:0.15s">
         <div class="step-num">3</div>
@@ -319,11 +319,10 @@ response = client.chat.completions.<span class="c-fn">create</span>(
       <p class="section-sub" data-i18n="feat.sub">From startup to enterprise scale — the Gateway grows with you.</p>
     </div>
     <div class="features-grid">
-      <div class="feature-card fade-in"><div class="feature-icon">🧠</div><h3 data-i18n="feat.f1.t">ML-Based Smart Routing</h3><p data-i18n="feat.f1.p">The Gateway learns from request patterns and automatically selects the optimal provider — balancing cost, quality, and latency for every call.</p></div>
-      <div class="feature-card fade-in" style="transition-delay:0.05s"><div class="feature-icon">🔒</div><h3 data-i18n="feat.f2.t">Zero-Exposure Key Security</h3><p data-i18n="feat.f2.p">Provider API keys are encrypted with AES-256-GCM and never leave the Gateway. Clients see only virtual keys — Provider credentials stay hidden.</p></div>
+<div class="feature-card fade-in" style="transition-delay:0.05s"><div class="feature-icon">🔒</div><h3 data-i18n="feat.f2.t">Zero-Exposure Key Security</h3><p data-i18n="feat.f2.p">Provider API keys are encrypted with AES-256-GCM and never leave the Gateway. Clients see only virtual keys — Provider credentials stay hidden.</p></div>
       <div class="feature-card fade-in" style="transition-delay:0.1s"><div class="feature-icon">💰</div><h3 data-i18n="feat.f3.t">Cost Control & Chargeback</h3><p data-i18n="feat.f3.p">Per-team soft/hard budgets, real-time cost tracking, and automated chargeback reports. Know exactly where every dollar goes.</p></div>
       <div class="feature-card fade-in" style="transition-delay:0.05s"><div class="feature-icon">🏢</div><h3 data-i18n="feat.f4.t">Enterprise Multi-Tenancy</h3><p data-i18n="feat.f4.p">4-tier Org → Team → User → Key hierarchy with RBAC, OAuth/SSO (Google, GitHub, Okta, OIDC), and isolated data per tenant.</p></div>
-      <div class="feature-card fade-in" style="transition-delay:0.1s"><div class="feature-icon">⚡</div><h3 data-i18n="feat.f5.t">Semantic & Exact Caching</h3><p data-i18n="feat.f5.p">Exact-match Redis caching and pgvector-powered semantic caching cut redundant LLM calls. Replay cached streams instantly.</p></div>
+      <div class="feature-card fade-in" style="transition-delay:0.1s"><div class="feature-icon">⚡</div><h3 data-i18n="feat.f5.t">Exact-Match Caching</h3><p data-i18n="feat.f5.p">Redis-backed exact-match caching for temperature=0 requests. Identical prompts skip the model entirely — instant response, zero cost.</p></div>
       <div class="feature-card fade-in" style="transition-delay:0.15s"><div class="feature-icon">🔌</div><h3 data-i18n="feat.f6.t">MCP Gateway Hub</h3><p data-i18n="feat.f6.p">Central hub for Model Context Protocol — route tool calls, manage server registrations, and proxy WebSocket/SSE/stdio transports.</p></div>
       <div class="feature-card fade-in"><div class="feature-icon">🛡️</div><h3 data-i18n="feat.f7.t">Guardrails & PII Protection</h3><p data-i18n="feat.f7.p">Block prompt injections, mask PII before it reaches any model, and enforce content policies — at the gateway layer, before any token is spent.</p></div>
       <div class="feature-card fade-in" style="transition-delay:0.05s"><div class="feature-icon">🔄</div><h3 data-i18n="feat.f8.t">Failover & Circuit Breakers</h3><p data-i18n="feat.f8.p">Automatic provider failover with weighted load balancing. Circuit breakers isolate failing providers so your service stays up.</p></div>
@@ -396,40 +395,6 @@ response = client.chat.completions.<span class="c-fn">create</span>(
 <!-- Detail -->
 <section id="detail">
   <div class="container">
-    <!-- Row 1 -->
-    <div class="detail-row fade-in">
-      <div class="detail-text">
-        <p class="section-label" data-i18n="d1.label">Intelligent Routing</p>
-        <h3 data-i18n="d1.title">The right model for every request — automatically</h3>
-        <p data-i18n="d1.p">The ML router analyzes request complexity, token count, and historical performance to pick the optimal provider. Run A/B tests between models and let data decide.</p>
-        <ul class="feature-list">
-          <li data-i18n="d1.l1">Cost-quality-latency multi-objective optimization</li>
-          <li data-i18n="d1.l2">A/B testing with statistical significance analysis and auto-winner promotion</li>
-          <li data-i18n="d1.l3">Weighted load balancing across providers and keys</li>
-          <li data-i18n="d1.l4">Circuit breakers isolate unhealthy providers in real time</li>
-        </ul>
-      </div>
-      <div class="detail-visual">
-        <div style="font-size:12px;color:var(--blush-40);margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em" data-i18n="d1.v.label">Routing Decision</div>
-        <div class="visual-row">
-          <div class="visual-icon" style="background:rgba(79,180,247,0.12)">📥</div>
-          <div class="visual-row-text"><div class="vt" data-i18n="d1.v1.t">Request: gpt-4o</div><div class="vs" data-i18n="d1.v1.s">1,240 tokens · complex reasoning</div></div>
-          <span class="visual-badge badge-blue" data-i18n="d1.v1.b">Incoming</span>
-        </div>
-        <div style="text-align:center;font-size:18px;color:var(--blush-20);padding:4px 0">↓</div>
-        <div class="visual-row" style="border-color:var(--paprika-30)">
-          <div class="visual-icon" style="background:var(--paprika-15)">🧠</div>
-          <div class="visual-row-text"><div class="vt" data-i18n="d1.v2.t">ML Router</div><div class="vs" data-i18n="d1.v2.s">cost × quality score → Anthropic</div></div>
-          <span class="visual-badge badge-red" data-i18n="d1.v2.b">Routing</span>
-        </div>
-        <div style="text-align:center;font-size:18px;color:var(--blush-20);padding:4px 0">↓</div>
-        <div class="visual-row">
-          <div class="visual-icon" style="background:rgba(40,200,100,0.12)">✅</div>
-          <div class="visual-row-text"><div class="vt" data-i18n="d1.v3.t">claude-3-5-sonnet → 198 tokens</div><div class="vs" data-i18n="d1.v3.s">saved $0.0031 vs gpt-4o</div></div>
-          <span class="visual-badge badge-green" data-i18n="d1.v3.b">Done</span>
-        </div>
-      </div>
-    </div>
     <!-- Row 2 -->
     <div class="detail-row reverse fade-in">
       <div class="detail-text">
@@ -536,7 +501,7 @@ const T = {
     'how.s1.title':  'Point Your SDK',
     'how.s1.p':      'Change <code style="font-size:12px;font-family:\'JetBrains Mono\',monospace;color:var(--paprika)">base_url</code> to the Gateway. No other code changes needed. Fully OpenAI-compatible.',
     'how.s2.title':  'Gateway Routes Intelligently',
-    'how.s2.p':      'ML-based routing selects the best provider per request — optimizing for cost, latency, or quality based on your rules.',
+    'how.s2.p':      'Configured fallback chains route each request to the right provider. Circuit breakers automatically skip unhealthy providers — your traffic keeps flowing.',
     'how.s3.title':  'You Stay in Control',
     'how.s3.p':      'Set budgets, rate limits, guardrails, and audit policies from the Admin Dashboard. Costs never spiral.',
     'stats.l1':      'Gateway overhead (P95)',
@@ -546,16 +511,14 @@ const T = {
     'feat.label':    'Features',
     'feat.title':    'Everything your LLM stack needs',
     'feat.sub':      'From startup to enterprise scale — the Gateway grows with you.',
-    'feat.f1.t':     'ML-Based Smart Routing',
-    'feat.f1.p':     'The Gateway learns from request patterns and automatically selects the optimal provider — balancing cost, quality, and latency for every call.',
     'feat.f2.t':     'Zero-Exposure Key Security',
     'feat.f2.p':     'Provider API keys are encrypted with AES-256-GCM and never leave the Gateway. Clients see only virtual keys — Provider credentials stay hidden.',
     'feat.f3.t':     'Cost Control & Chargeback',
     'feat.f3.p':     'Per-team soft/hard budgets, real-time cost tracking, and automated chargeback reports. Know exactly where every dollar goes.',
     'feat.f4.t':     'Enterprise Multi-Tenancy',
     'feat.f4.p':     '4-tier Org → Team → User → Key hierarchy with RBAC, OAuth/SSO (Google, GitHub, Okta, OIDC), and isolated data per tenant.',
-    'feat.f5.t':     'Semantic & Exact Caching',
-    'feat.f5.p':     'Exact-match Redis caching and pgvector-powered semantic caching cut redundant LLM calls. Replay cached streams instantly.',
+    'feat.f5.t':     'Exact-Match Caching',
+    'feat.f5.p':     'Redis-backed exact-match caching for temperature=0 requests. Identical prompts skip the model entirely — instant response, zero cost.',
     'feat.f6.t':     'MCP Gateway Hub',
     'feat.f6.p':     'Central hub for Model Context Protocol — route tool calls, manage server registrations, and proxy WebSocket/SSE/stdio transports.',
     'feat.f7.t':     'Guardrails & PII Protection',
@@ -570,23 +533,6 @@ const T = {
     'code.before':   'Before',
     'code.after':    'After',
     'code.compat':   'Works with Python, TypeScript, Go, Ruby, curl — any OpenAI-compatible client.',
-    'd1.label':      'Intelligent Routing',
-    'd1.title':      'The right model for every request — automatically',
-    'd1.p':          'The ML router analyzes request complexity, token count, and historical performance to pick the optimal provider. Run A/B tests between models and let data decide.',
-    'd1.l1':         'Cost-quality-latency multi-objective optimization',
-    'd1.l2':         'A/B testing with statistical significance analysis and auto-winner promotion',
-    'd1.l3':         'Weighted load balancing across providers and keys',
-    'd1.l4':         'Circuit breakers isolate unhealthy providers in real time',
-    'd1.v.label':    'Routing Decision',
-    'd1.v1.t':       'Request: gpt-4o',
-    'd1.v1.s':       '1,240 tokens · complex reasoning',
-    'd1.v1.b':       'Incoming',
-    'd1.v2.t':       'ML Router',
-    'd1.v2.s':       'cost × quality score → Anthropic',
-    'd1.v2.b':       'Routing',
-    'd1.v3.t':       'claude-3-5-sonnet → 198 tokens',
-    'd1.v3.s':       'saved $0.0031 vs gpt-4o',
-    'd1.v3.b':       'Done',
     'd2.label':      'Enterprise Ready',
     'd2.title':      'Built for teams, trusted by organizations',
     'd2.p':          'A full 4-tier hierarchy with RBAC, SSO, and complete data isolation per tenant. Every action is audit-logged with immutable tamper-evident records.',
@@ -642,7 +588,7 @@ const T = {
     'how.s1.title':  'SDK 연결',
     'how.s1.p':      '<code style="font-size:12px;font-family:\'JetBrains Mono\',monospace;color:var(--paprika)">base_url</code>만 게이트웨이 주소로 바꾸면 끝입니다. 다른 코드는 건드릴 필요 없고, OpenAI SDK와 100% 호환됩니다.',
     'how.s2.title':  '자동으로 최적 경로 선택',
-    'how.s2.p':      'ML 라우터가 요청마다 비용, 속도, 품질을 따져 가장 좋은 프로바이더로 알아서 보냅니다.',
+    'how.s2.p':      '설정한 폴백 체인이 요청을 적합한 프로바이더로 라우팅합니다. 서킷 브레이커가 이상 프로바이더를 자동으로 건너뛰어 트래픽이 끊기지 않습니다.',
     'how.s3.title':  '제어권은 팀에게',
     'how.s3.p':      '예산, 요청률, 가드레일, 감사 정책을 Admin 대시보드에서 손쉽게 설정할 수 있습니다. 비용이 예상 밖으로 튀는 일은 없습니다.',
     'stats.l1':      '게이트웨이 오버헤드 (P95)',
@@ -652,16 +598,14 @@ const T = {
     'feat.label':    '기능',
     'feat.title':    'LLM 인프라에 필요한 건 다 있습니다',
     'feat.sub':      '스타트업이든 대기업이든 — 규모에 맞게 함께 커갑니다.',
-    'feat.f1.t':     'ML 기반 스마트 라우팅',
-    'feat.f1.p':     '요청 패턴을 학습해 매 호출마다 최적의 프로바이더를 골라냅니다. 비용·품질·속도를 동시에 잡습니다.',
     'feat.f2.t':     '프로바이더 키 완전 은폐',
     'feat.f2.p':     'AES-256-GCM으로 암호화한 프로바이더 키는 게이트웨이 밖으로 절대 나가지 않습니다. 클라이언트에는 가상 키만 보입니다.',
     'feat.f3.t':     '비용 제어 & 차지백',
     'feat.f3.p':     '팀별 예산 한도 설정, 실시간 비용 모니터링, 자동 차지백 리포트. 비용이 어디서 얼마나 나가는지 한눈에 파악하세요.',
     'feat.f4.t':     '엔터프라이즈 멀티테넌시',
     'feat.f4.p':     'Org → Team → User → Key 4단계 계층, RBAC, OAuth/SSO(Google · GitHub · Okta · OIDC), 테넌트별 완전 격리까지.',
-    'feat.f5.t':     '시맨틱 & 정확 매칭 캐시',
-    'feat.f5.p':     'Redis 완전 일치 캐시와 pgvector 시맨틱 캐시로 중복 LLM 호출을 줄입니다. 캐시된 스트리밍 응답도 즉시 재생됩니다.',
+    'feat.f5.t':     '정확 매칭 캐시',
+    'feat.f5.p':     'temperature=0 요청에 한해 Redis 기반 정확 매칭 캐시를 적용합니다. 동일한 프롬프트는 모델을 거치지 않고 즉시 응답 — 비용 없이.',
     'feat.f6.t':     'MCP 게이트웨이 허브',
     'feat.f6.p':     'Model Context Protocol의 중앙 허브입니다. 툴 호출 라우팅, MCP 서버 관리, WebSocket/SSE/stdio 프록시를 한곳에서.',
     'feat.f7.t':     '가드레일 & PII 보호',
@@ -676,23 +620,6 @@ const T = {
     'code.before':   '변경 전',
     'code.after':    '변경 후',
     'code.compat':   'Python, TypeScript, Go, Ruby, curl — OpenAI 호환 클라이언트라면 뭐든 됩니다.',
-    'd1.label':      '지능형 라우팅',
-    'd1.title':      '요청마다 최적의 모델을 — 자동으로',
-    'd1.p':          'ML 라우터가 요청 복잡도, 토큰 수, 이전 성능 이력을 분석해 최적의 프로바이더를 고릅니다. 모델 간 A/B 테스트를 돌리고, 데이터로 결정하세요.',
-    'd1.l1':         '비용·품질·레이턴시 다목적 최적화',
-    'd1.l2':         '통계적 유의성 기반 A/B 테스트, 자동 승자 전환',
-    'd1.l3':         '프로바이더·키 간 가중 로드 밸런싱',
-    'd1.l4':         '이상 프로바이더를 실시간으로 격리하는 서킷 브레이커',
-    'd1.v.label':    '라우팅 결정',
-    'd1.v1.t':       '요청: gpt-4o',
-    'd1.v1.s':       '1,240 토큰 · 복잡한 추론',
-    'd1.v1.b':       '수신',
-    'd1.v2.t':       'ML 라우터',
-    'd1.v2.s':       '비용 × 품질 점수 → Anthropic 선택',
-    'd1.v2.b':       '라우팅 중',
-    'd1.v3.t':       'claude-3-5-sonnet → 198 토큰',
-    'd1.v3.s':       'gpt-4o 대비 $0.0031 절약',
-    'd1.v3.b':       '완료',
     'd2.label':      '엔터프라이즈',
     'd2.title':      '팀을 위해 만들고, 조직이 믿고 쓰는',
     'd2.p':          'RBAC, SSO, 테넌트별 완전 격리를 갖춘 4단계 계층 구조. 모든 액션은 위·변조 불가능한 감사 로그로 남습니다.',

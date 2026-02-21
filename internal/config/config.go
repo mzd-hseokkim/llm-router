@@ -308,28 +308,17 @@ type CustomKeywordsGuardrailConfig struct {
 	Blocked  []string `koanf:"blocked"`
 }
 
-// CacheConfig holds exact-match and semantic cache configuration.
+// CacheConfig holds exact-match cache configuration.
+// Only temperature=0 requests are cached (non-deterministic responses are never cached).
 type CacheConfig struct {
-	ExactMatch ExactCacheConfig    `koanf:"exact_match"`
-	Semantic   SemanticCacheConfig `koanf:"semantic"`
+	ExactMatch ExactCacheConfig `koanf:"exact_match"`
 }
 
 type ExactCacheConfig struct {
-	Enabled                  bool          `koanf:"enabled"`
-	DefaultTTL               time.Duration `koanf:"default_ttl"`
-	MaxTTL                   time.Duration `koanf:"max_ttl"`
-	MaxResponseSize          int64         `koanf:"max_response_size"`
-	CacheTemperatureZeroOnly bool          `koanf:"cache_temperature_zero_only"`
-}
-
-type SemanticCacheConfig struct {
 	Enabled         bool          `koanf:"enabled"`
-	Threshold       float64       `koanf:"threshold"`
-	EmbeddingModel  string        `koanf:"embedding_model"`
-	MaxCacheEntries int           `koanf:"max_cache_entries"`
-	TTL             time.Duration `koanf:"ttl"`
-	// EmbeddingAPIKey for the embedding provider (defaults to providers.openai.api_key)
-	EmbeddingAPIKey string `koanf:"embedding_api_key"`
+	DefaultTTL      time.Duration `koanf:"default_ttl"`
+	MaxTTL          time.Duration `koanf:"max_ttl"`
+	MaxResponseSize int64         `koanf:"max_response_size"`
 }
 
 // AlertingConfig holds alerting channel and routing configuration.
@@ -421,17 +410,5 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Cache.ExactMatch.MaxResponseSize == 0 {
 		cfg.Cache.ExactMatch.MaxResponseSize = 1 << 20 // 1MB
-	}
-	if cfg.Cache.Semantic.Threshold == 0 {
-		cfg.Cache.Semantic.Threshold = 0.95
-	}
-	if cfg.Cache.Semantic.EmbeddingModel == "" {
-		cfg.Cache.Semantic.EmbeddingModel = "text-embedding-3-small"
-	}
-	if cfg.Cache.Semantic.MaxCacheEntries == 0 {
-		cfg.Cache.Semantic.MaxCacheEntries = 100000
-	}
-	if cfg.Cache.Semantic.TTL == 0 {
-		cfg.Cache.Semantic.TTL = 24 * time.Hour
 	}
 }

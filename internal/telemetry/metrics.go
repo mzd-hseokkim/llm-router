@@ -86,14 +86,14 @@ var (
 	// --- Cache metrics ---
 
 	// CacheRequestsTotal counts cache lookups.
-	// Labels: type (exact|semantic), result (hit|miss).
+	// Labels: type (exact), result (hit|miss).
 	CacheRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "gateway_cache_requests_total",
 		Help: "Total cache lookup requests.",
 	}, []string{"type", "result"})
 
 	// CacheHitRatio tracks the rolling cache hit ratio.
-	// Labels: type (exact|semantic).
+	// Labels: type (exact).
 	CacheHitRatio = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "gateway_cache_hit_ratio",
 		Help: "Rolling cache hit ratio (approximate).",

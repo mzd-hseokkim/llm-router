@@ -63,7 +63,7 @@ type RequestLogContext struct {
 	// Set by budget middleware after handler returns
 	CostUSD float64
 
-	// Set by cache middleware (hit|semantic_hit|miss)
+	// Set by cache middleware (hit|miss)
 	CacheResult string
 }
 
