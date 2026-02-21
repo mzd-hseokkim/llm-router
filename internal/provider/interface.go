@@ -59,3 +59,12 @@ func (r *Registry) AllModels() []types.ModelInfo {
 	}
 	return models
 }
+
+// AllProviders returns the names of all registered providers.
+func (r *Registry) AllProviders() []string {
+	names := make([]string, 0, len(r.providers))
+	for name := range r.providers {
+		names = append(names, name)
+	}
+	return names
+}

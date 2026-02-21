@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/llm-router/gateway/internal/auth"
@@ -15,6 +16,7 @@ import (
 	"github.com/llm-router/gateway/internal/crypto"
 	"github.com/llm-router/gateway/internal/gateway/handler"
 	"github.com/llm-router/gateway/internal/gateway/router"
+	"github.com/llm-router/gateway/internal/health"
 	internalhandler "github.com/llm-router/gateway/internal/handler"
 	"github.com/llm-router/gateway/internal/provider"
 	provideranthropic "github.com/llm-router/gateway/internal/provider/anthropic"
@@ -24,6 +26,8 @@ import (
 	pgstore "github.com/llm-router/gateway/internal/store/postgres"
 	"github.com/llm-router/gateway/internal/telemetry"
 )
+
+const version = "1.0.0"
 
 func main() {
 	cfg, err := config.Load("config/config.yaml")
@@ -63,7 +67,7 @@ func main() {
 	// --- Provider Key Manager ---
 	km, cipher := buildKeyManager(pool, cfg, logger)
 
-	// --- Providers (all registered; KeyManager handles fallback to config keys) ---
+	// --- Providers ---
 	registry := provider.NewRegistry()
 	registry.Register(provideropenai.NewManaged(km, cfg.Providers.OpenAI.BaseURL))
 	registry.Register(provideranthropic.NewManaged(km, cfg.Providers.Anthropic.BaseURL))
@@ -75,17 +79,34 @@ func main() {
 	logWriter := telemetry.NewLogWriter(logStore, logger)
 	defer logWriter.Close()
 
+	// --- Provider health tracker ---
+	tracker := health.NewProviderTracker()
+
+	// --- Health checker ---
+	checker := health.NewChecker(pool, redisClient, version)
+	healthHandler := handler.NewHealthHandler(checker, tracker, registry)
+
 	// --- HTTP server ---
 	srv := server.New(cfg.Server, logger)
+	r := srv.Router()
 
 	// /v1 routes — protected by virtual key auth
-	router.Setup(srv.Router(), registry, logger, authMw.Middleware, logWriter)
+	router.Setup(r, registry, logger, authMw.Middleware, logWriter, tracker)
 
-	// /ping — unauthenticated
-	srv.Router().Get("/ping", internalhandler.Ping())
+	// /ping — unauthenticated liveness stub (kept for backwards compatibility)
+	r.Get("/ping", internalhandler.Ping())
+
+	// /health/* — unauthenticated health endpoints
+	r.Get("/health", healthHandler.Full)
+	r.Get("/health/live", healthHandler.Live)
+	r.Get("/health/ready", healthHandler.Ready)
+	r.Get("/health/providers", healthHandler.Providers)
+
+	// /metrics — Prometheus metrics
+	r.Handle("/metrics", promhttp.Handler())
 
 	// /admin/* — protected by master key
-	registerAdminRoutes(srv.Router(), keyStore, keyCache, km, cipher, pool, logStore, cfg, logger)
+	registerAdminRoutes(r, keyStore, keyCache, km, cipher, pool, logStore, cfg, logger)
 
 	if err := srv.ListenAndServe(context.Background()); err != nil {
 		logger.Error("server exited with error", "error", err)

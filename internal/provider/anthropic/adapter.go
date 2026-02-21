@@ -101,7 +101,7 @@ func (a *Adapter) ChatCompletion(ctx context.Context, model string, req *types.C
 
 	resp, err := a.client.Do(httpReq)
 	if err != nil {
-		return nil, provider.NewUnavailableError(err.Error())
+		return nil, provider.NewNetworkError(err.Error())
 	}
 	defer resp.Body.Close()
 
@@ -111,7 +111,7 @@ func (a *Adapter) ChatCompletion(ctx context.Context, model string, req *types.C
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, provider.NormalizeHTTPError(resp.StatusCode, string(respBody))
+		return nil, ParseError(resp.StatusCode, respBody, resp.Header)
 	}
 
 	return ParseResponse(req.Model, respBody)

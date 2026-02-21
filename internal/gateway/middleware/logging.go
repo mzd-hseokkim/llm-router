@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -9,29 +10,33 @@ import (
 	"github.com/llm-router/gateway/internal/telemetry"
 )
 
-// RequestLogger returns a middleware that records a LogEntry for every request
-// that has model information (i.e. LLM API calls). Non-API paths like /ping
-// are skipped because handlers never call telemetry.SetModel.
-func RequestLogger(w *telemetry.LogWriter, logger *slog.Logger) func(http.Handler) http.Handler {
+// RequestRecorder receives a request result for provider health tracking.
+// Implemented by health.ProviderTracker.
+type RequestRecorder interface {
+	Record(providerName string, success bool)
+}
+
+// RequestLogger returns a middleware that records a LogEntry for every LLM API request
+// and updates Prometheus metrics. Non-API paths (e.g. /ping) are skipped because
+// handlers never call telemetry.SetModel.
+func RequestLogger(w *telemetry.LogWriter, logger *slog.Logger, recorder RequestRecorder) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 			start := time.Now()
 
-			// Inject a mutable log context so handlers can record model/token data.
 			ctx, lc := telemetry.NewRequestLogContext(r.Context())
 			r = r.WithContext(ctx)
 
-			// Wrap the writer to capture the HTTP status code.
 			sw := &statusWriter{ResponseWriter: rw}
 
 			next.ServeHTTP(sw, r)
 
-			// Skip logging for requests that aren't LLM API calls.
 			if lc.Model == "" {
 				return
 			}
 
 			latencyMs := time.Since(start).Milliseconds()
+			statusCode := sw.status()
 
 			entry := &telemetry.LogEntry{
 				RequestID:        chimiddleware.GetReqID(r.Context()),
@@ -49,7 +54,7 @@ func RequestLogger(w *telemetry.LogWriter, logger *slog.Logger) func(http.Handle
 				ErrorCode:        lc.ErrorCode,
 				ErrorMessage:     lc.ErrorMessage,
 				IsStreaming:      lc.IsStreaming,
-				StatusCode:       sw.status(),
+				StatusCode:       statusCode,
 				LatencyMs:        latencyMs,
 			}
 
@@ -68,6 +73,19 @@ func RequestLogger(w *telemetry.LogWriter, logger *slog.Logger) func(http.Handle
 			)
 
 			w.Write(entry)
+
+			// Update Prometheus metrics.
+			if lc.Provider != "" {
+				statusLabel := fmt.Sprintf("%d", statusCode)
+				telemetry.RequestsTotal.WithLabelValues(lc.Provider, lc.Model, statusLabel).Inc()
+				telemetry.RequestDurationSeconds.WithLabelValues(lc.Provider, lc.Model).
+					Observe(float64(latencyMs) / 1000.0)
+			}
+
+			// Update provider health tracker.
+			if recorder != nil && lc.Provider != "" {
+				recorder.Record(lc.Provider, statusCode < 500)
+			}
 		})
 	}
 }

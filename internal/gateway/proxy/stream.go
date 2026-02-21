@@ -3,11 +3,13 @@ package proxy
 import (
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
+	"github.com/llm-router/gateway/internal/gateway/retry"
 	"github.com/llm-router/gateway/internal/gateway/types"
 	"github.com/llm-router/gateway/internal/provider"
 	"github.com/llm-router/gateway/internal/telemetry"
@@ -15,13 +17,12 @@ import (
 
 const (
 	keepaliveInterval = 15 * time.Second
-	streamMaxDuration = 5 * time.Minute
 	writeTimeout      = 30 * time.Second
 )
 
 // StreamToClient proxies a streaming chat completion from p to the HTTP client.
-// It sets SSE response headers, forwards each chunk immediately, sends keepalive
-// comments every 15 s, and cancels the upstream request if the client disconnects.
+// The provider stream is initiated (with retry) before writing SSE headers, so
+// a proper HTTP error status can be returned if init fails.
 func StreamToClient(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -37,7 +38,46 @@ func StreamToClient(
 		return
 	}
 
-	// Set SSE headers before the first write.
+	ctx := r.Context()
+
+	// Initiate the provider stream with retry BEFORE writing SSE headers.
+	// This allows returning a proper HTTP error status if the provider fails.
+	var chunks <-chan provider.StreamChunk
+	if err := retry.Execute(ctx, retry.Default(), func() error {
+		var e error
+		chunks, e = p.ChatCompletionStream(ctx, parsed.Model, req, rawBody)
+		return e
+	}); err != nil {
+		logger.Error("provider stream init failed",
+			"provider", parsed.Provider,
+			"model", parsed.Model,
+			"error", err)
+		var gwErr *provider.GatewayError
+		if errors.As(err, &gwErr) {
+			telemetry.SetError(ctx, string(gwErr.Code), gwErr.Message)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(gwErr.HTTPStatus)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]string{
+					"message": gwErr.Message,
+					"type":    string(gwErr.Code),
+				},
+			})
+		} else {
+			telemetry.SetError(ctx, "stream_error", err.Error())
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]string{
+					"message": err.Error(),
+					"type":    "api_error",
+				},
+			})
+		}
+		return
+	}
+
+	// Stream init succeeded — now commit to SSE.
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache, no-transform")
 	w.Header().Set("Connection", "keep-alive")
@@ -45,21 +85,7 @@ func StreamToClient(
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	// Derive a context that is cancelled on stream timeout OR client disconnect.
-	ctx := r.Context()
-
 	rc := http.NewResponseController(w)
-
-	chunks, err := p.ChatCompletionStream(ctx, parsed.Model, req, rawBody)
-	if err != nil {
-		logger.Error("provider stream init failed",
-			"provider", parsed.Provider,
-			"model", parsed.Model,
-			"error", err)
-		writeSSEError(w, err.Error())
-		flusher.Flush()
-		return
-	}
 
 	id := newStreamID()
 	created := time.Now().Unix()
@@ -83,7 +109,7 @@ func StreamToClient(
 		select {
 
 		case <-ctx.Done():
-			// Client disconnected or stream timed out; upstream is cancelled via ctx.
+			// Client disconnected or context cancelled; upstream cancelled via ctx.
 			return
 
 		case <-ka.C:
@@ -93,7 +119,6 @@ func StreamToClient(
 
 		case chunk, open := <-chunks:
 			if !open {
-				// Provider goroutine closed the channel — stream ended normally.
 				resetWriteDeadline(rc)
 				fmt.Fprint(w, "data: [DONE]\n\n")
 				flusher.Flush()
@@ -138,7 +163,6 @@ func buildChunk(id string, created int64, model string, sc provider.StreamChunk)
 	}
 
 	if sc.FinishReason != nil {
-		// Finish chunk: empty delta, finish_reason set.
 		c.Choices = []types.ChunkChoice{{
 			Index:        0,
 			Delta:        types.Delta{},
@@ -160,13 +184,17 @@ func writeChunk(w http.ResponseWriter, chunk types.ChatCompletionChunk) {
 }
 
 func writeSSEError(w http.ResponseWriter, msg string) {
-	errData, _ := json.Marshal(map[string]string{"error": msg})
+	errData, _ := json.Marshal(map[string]any{
+		"error": map[string]string{
+			"message": msg,
+			"type":    "provider_error",
+		},
+	})
 	fmt.Fprintf(w, "data: %s\n\n", errData)
 	fmt.Fprint(w, "data: [DONE]\n\n")
 }
 
 func resetWriteDeadline(rc *http.ResponseController) {
-	// Best-effort; ignore if the transport doesn't support it.
 	_ = rc.SetWriteDeadline(time.Now().Add(writeTimeout))
 }
 

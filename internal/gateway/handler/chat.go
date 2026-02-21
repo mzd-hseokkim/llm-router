@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/llm-router/gateway/internal/gateway/proxy"
+	"github.com/llm-router/gateway/internal/gateway/retry"
 	"github.com/llm-router/gateway/internal/gateway/types"
 	"github.com/llm-router/gateway/internal/provider"
 	"github.com/llm-router/gateway/internal/telemetry"
@@ -61,14 +63,25 @@ func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := p.ChatCompletion(r.Context(), parsed.Model, &req, body)
+	var resp *types.ChatCompletionResponse
+	err = retry.Execute(r.Context(), retry.Default(), func() error {
+		var e error
+		resp, e = p.ChatCompletion(r.Context(), parsed.Model, &req, body)
+		return e
+	})
 	if err != nil {
 		h.logger.Error("provider chat completion failed",
 			"provider", parsed.Provider,
 			"model", parsed.Model,
 			"error", err)
-		telemetry.SetError(r.Context(), "api_error", err.Error())
-		writeError(w, http.StatusBadGateway, err.Error(), "api_error", "")
+		var gwErr *provider.GatewayError
+		if errors.As(err, &gwErr) {
+			telemetry.SetError(r.Context(), string(gwErr.Code), gwErr.Message)
+			writeError(w, gwErr.HTTPStatus, gwErr.Message, string(gwErr.Code), "")
+		} else {
+			telemetry.SetError(r.Context(), "api_error", err.Error())
+			writeError(w, http.StatusBadGateway, err.Error(), "api_error", "")
+		}
 		return
 	}
 

@@ -54,13 +54,13 @@ func (a *Adapter) ChatCompletionStream(ctx context.Context, model string, req *t
 
 	resp, err := newStreamHTTPClient().Do(httpReq)
 	if err != nil {
-		return nil, provider.NewUnavailableError(err.Error())
+		return nil, provider.NewNetworkError(err.Error())
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return nil, provider.NormalizeHTTPError(resp.StatusCode, string(b))
+		return nil, ParseError(resp.StatusCode, b, resp.Header)
 	}
 
 	ch := make(chan provider.StreamChunk, 16)

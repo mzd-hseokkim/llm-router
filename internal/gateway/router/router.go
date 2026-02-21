@@ -14,11 +14,13 @@ import (
 // Setup registers all /v1 API routes on the given chi router.
 // authMw is the virtual-key middleware injected from main; it replaces the stub.
 // logWriter, when non-nil, enables per-request DB logging.
-func Setup(r chi.Router, registry *provider.Registry, logger *slog.Logger, authMw func(http.Handler) http.Handler, logWriter *telemetry.LogWriter) {
+// recorder, when non-nil, receives provider health events for tracking.
+func Setup(r chi.Router, registry *provider.Registry, logger *slog.Logger, authMw func(http.Handler) http.Handler, logWriter *telemetry.LogWriter, recorder middleware.RequestRecorder) {
+	r.Use(middleware.Recovery(logger))
 	r.Use(middleware.RequestMeta)
 
 	if logWriter != nil {
-		r.Use(middleware.RequestLogger(logWriter, logger))
+		r.Use(middleware.RequestLogger(logWriter, logger, recorder))
 	}
 
 	r.Route("/v1", func(r chi.Router) {
