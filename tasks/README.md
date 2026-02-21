@@ -99,6 +99,8 @@ tasks/
 
 **Phase 4 완료 기준**: ML이 최적 Provider를 자동 선택, 팀이 프롬프트를 버전 관리, 자체 GPU도 Gateway로 통합
 
+**Phase 4 버그/보안 수정** (완료): WebSocket gorilla/websocket 교체(RFC 6455), stdio 절대경로 강제·위험 env 차단, proxy 캐시 cleanup goroutine·FNV 캐시키, scheduler panic recovery, SSE HTTP 클라이언트 timeout 분리, stdio 버퍼 4MB→512KB, migration 017(request_id 인덱스·2027~2028 파티션·audit_logs RLS org 스코프)
+
 ---
 
 ## 핵심 설계 원칙
