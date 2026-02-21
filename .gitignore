@@ -56,3 +56,4 @@ admin-ui/out/
 admin-ui/.env
 admin-ui/.env.local
 admin-ui/.env.*.local
+admin-ui/tsconfig.tsbuildinfo
