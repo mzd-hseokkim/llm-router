@@ -11,6 +11,7 @@ import (
 	"github.com/llm-router/gateway/internal/gateway/handler"
 	"github.com/llm-router/gateway/internal/gateway/middleware"
 	"github.com/llm-router/gateway/internal/guardrail"
+	"github.com/llm-router/gateway/internal/prompt"
 	"github.com/llm-router/gateway/internal/provider"
 	"github.com/llm-router/gateway/internal/ratelimit"
 	"github.com/llm-router/gateway/internal/telemetry"
@@ -34,6 +35,7 @@ func Setup(
 	cacheMw *middleware.CacheMiddleware,
 	guardrailPipeline *guardrail.Pipeline,
 	advancedRouter *AdvancedRouter,
+	promptSvc *prompt.Service,
 ) *handler.ChatHandler {
 	r.Use(middleware.Recovery(logger))
 	r.Use(middleware.RequestMeta)
@@ -62,6 +64,11 @@ func Setup(
 		// Guardrail middleware
 		if guardrailPipeline != nil {
 			r.Use(middleware.GuardrailCheck(guardrailPipeline))
+		}
+
+		// Prompt injection middleware
+		if promptSvc != nil {
+			r.Use(middleware.PromptInjector(promptSvc, logger))
 		}
 
 		chat = handler.NewChatHandler(fr, logger).WithChains(chains)

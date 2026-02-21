@@ -59,13 +59,38 @@ type GatewayConfig struct {
 }
 
 type ProvidersConfig struct {
-	OpenAI    ProviderConfig       `koanf:"openai"`
-	Anthropic ProviderConfig       `koanf:"anthropic"`
-	Gemini    ProviderConfig       `koanf:"gemini"`
-	Azure     AzureProviderConfig  `koanf:"azure"`
-	Mistral   ProviderConfig       `koanf:"mistral"`
-	Cohere    ProviderConfig       `koanf:"cohere"`
-	Bedrock   BedrockProviderConfig `koanf:"bedrock"`
+	OpenAI     ProviderConfig          `koanf:"openai"`
+	Anthropic  ProviderConfig          `koanf:"anthropic"`
+	Gemini     ProviderConfig          `koanf:"gemini"`
+	Azure      AzureProviderConfig     `koanf:"azure"`
+	Mistral    ProviderConfig          `koanf:"mistral"`
+	Cohere     ProviderConfig          `koanf:"cohere"`
+	Bedrock    BedrockProviderConfig   `koanf:"bedrock"`
+	SelfHosted []SelfHostedConfig      `koanf:"self_hosted"`
+}
+
+// SelfHostedConfig configures a self-hosted LLM inference server.
+type SelfHostedConfig struct {
+	// Name is the provider identifier used in model prefixes, e.g. "ollama_local".
+	Name    string                    `koanf:"name"`
+	// Engine is one of: ollama, vllm, tgi, lmstudio.
+	Engine  string                    `koanf:"engine"`
+	BaseURL string                    `koanf:"base_url"`
+	Models  []SelfHostedModelConfig   `koanf:"models"`
+	// InitialLoadTimeout is the timeout for the first request (model loading may take minutes).
+	InitialLoadTimeout string         `koanf:"initial_load_timeout"`
+}
+
+// SelfHostedModelConfig describes one model exposed by a self-hosted engine.
+type SelfHostedModelConfig struct {
+	// ID is the Gateway model identifier, e.g. "ollama/llama3.2:3b".
+	ID          string  `koanf:"id"`
+	// ModelName is the name used in requests to the inference server.
+	ModelName   string  `koanf:"model_name"`
+	ContextWindow int   `koanf:"context_window"`
+	// InputCostPerMillion and OutputCostPerMillion are optional cost overrides (USD).
+	InputCostPerMillion  float64 `koanf:"input_cost_per_million"`
+	OutputCostPerMillion float64 `koanf:"output_cost_per_million"`
 }
 
 type ProviderConfig struct {

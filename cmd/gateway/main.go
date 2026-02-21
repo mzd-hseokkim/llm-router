@@ -36,6 +36,7 @@ import (
 	"github.com/llm-router/gateway/internal/guardrail/injection"
 	"github.com/llm-router/gateway/internal/guardrail/keyword"
 	"github.com/llm-router/gateway/internal/guardrail/pii"
+	"github.com/llm-router/gateway/internal/prompt"
 	"github.com/llm-router/gateway/internal/health"
 	internalhandler "github.com/llm-router/gateway/internal/handler"
 	"github.com/llm-router/gateway/internal/provider"
@@ -46,6 +47,7 @@ import (
 	providergemini "github.com/llm-router/gateway/internal/provider/gemini"
 	providermistral "github.com/llm-router/gateway/internal/provider/mistral"
 	provideropenai "github.com/llm-router/gateway/internal/provider/openai"
+	providerselfhosted "github.com/llm-router/gateway/internal/provider/selfhosted"
 	"github.com/llm-router/gateway/internal/ratelimit"
 	"github.com/llm-router/gateway/internal/server"
 	pgstore "github.com/llm-router/gateway/internal/store/postgres"
@@ -191,9 +193,13 @@ func main() {
 	ruleStore := pgstore.NewRoutingRuleStore(pool)
 	advRouter := buildAdvancedRouter(ruleStore, costCalc, logger)
 
+	// --- Prompt management ---
+	promptStore := pgstore.NewPromptStore(pool)
+	promptSvc := prompt.NewService(promptStore)
+
 	// /v1 routes — protected by virtual key auth
 	chatHandler := router.Setup(r, registry, fr, buildFallbackChains(cfg.Routing), logger,
-		authMw.Middleware, logWriter, tracker, rateLimiter, budgetMgr, costCalc, cacheMw, guardrailPipeline, advRouter)
+		authMw.Middleware, logWriter, tracker, rateLimiter, budgetMgr, costCalc, cacheMw, guardrailPipeline, advRouter, promptSvc)
 
 	// Subscribe chat handler to routing config changes so that PUT /admin/routing
 	// immediately updates the active fallback chains.
@@ -201,6 +207,12 @@ func main() {
 		chatHandler.SetChains(buildFallbackChains(newCfg))
 		logger.Info("fallback chains reloaded from routing store")
 	})
+
+	// /docs — Swagger UI (unauthenticated; spec itself is public)
+	docsHandler := handler.NewDocsHandler()
+	r.Get("/docs", docsHandler.UI)
+	r.Get("/docs/openapi.json", docsHandler.JSON)
+	r.Get("/docs/openapi.yaml", docsHandler.YAML)
 
 	// /ping — unauthenticated liveness stub (kept for backwards compatibility)
 	r.Get("/ping", internalhandler.Ping())
@@ -219,7 +231,7 @@ func main() {
 	roleStore := pgstore.NewRoleStore(pool)
 	registerAdminRoutes(r, keyStore, keyCache, km, cipher, pool, logStore, cb, cfg, logger,
 		rateLimiter, budgetMgr, budgetStore, routingStore, orgStore, roleStore, ec, ruleStore, advRouter,
-		auditLogger, auditStore, alertRouter)
+		auditLogger, auditStore, alertRouter, promptStore, promptSvc)
 
 	// /auth/* — OAuth / SSO endpoints
 	oauthProviders := buildOAuthProviders(cfg)
@@ -285,6 +297,22 @@ func buildRegistry(km *provider.KeyManager, cfg *config.Config) *provider.Regist
 			},
 		}
 		registry.Register(providerbedrock.New(bedrockCfg))
+	}
+
+	// Self-hosted inference servers (Ollama, vLLM, TGI, LMStudio)
+	for _, sh := range cfg.Providers.SelfHosted {
+		if sh.Name == "" || sh.BaseURL == "" {
+			continue
+		}
+		models := make([]providerselfhosted.ModelEntry, 0, len(sh.Models))
+		for _, m := range sh.Models {
+			models = append(models, providerselfhosted.ModelEntry{
+				ID:        m.ID,
+				ModelName: m.ModelName,
+			})
+		}
+		adapter := providerselfhosted.New(sh.Name, sh.BaseURL, providerselfhosted.Engine(sh.Engine), models)
+		registry.Register(adapter)
 	}
 
 	return registry
@@ -369,6 +397,8 @@ func registerAdminRoutes(
 	auditLogger *audit.Logger,
 	auditStore *pgstore.AuditStore,
 	alertRouter *alerting.Router,
+	promptStore *pgstore.PromptStore,
+	promptSvc *prompt.Service,
 ) {
 	adminMw := auth.AdminAuth(cfg.Gateway.MasterKey)
 
@@ -484,9 +514,24 @@ func registerAdminRoutes(
 			r.Get("/admin/alerts/history", alertsHandler.History)
 		}
 
+		// Prompt management
+		if promptStore != nil {
+			promptsHandler := handler.NewAdminPromptsHandler(promptSvc, promptStore)
+			r.Get("/admin/prompts", promptsHandler.List)
+			r.Post("/admin/prompts", promptsHandler.Create)
+			r.Get("/admin/prompts/{slug}", promptsHandler.Get)
+			r.Get("/admin/prompts/{slug}/versions", promptsHandler.ListVersions)
+			r.Post("/admin/prompts/{slug}/versions", promptsHandler.PublishVersion)
+			r.Get("/admin/prompts/{slug}/versions/{version}", promptsHandler.GetVersion)
+			r.Post("/admin/prompts/{slug}/rollback/{version}", promptsHandler.Rollback)
+			r.Post("/admin/prompts/{slug}/render", promptsHandler.Render)
+			r.Get("/admin/prompts/{slug}/diff", promptsHandler.Diff)
+		}
+
 		// OpenAPI spec
 		openAPIHandler := handler.NewAdminOpenAPIHandler()
 		r.Get("/admin/openapi.json", openAPIHandler.Spec)
+		r.Get("/admin/openapi.yaml", openAPIHandler.SpecYAML)
 	})
 }
 

@@ -1,7 +1,10 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // AdminOpenAPIHandler serves the OpenAPI specification for the Admin API.
@@ -16,13 +19,35 @@ func (h *AdminOpenAPIHandler) Spec(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, spec)
 }
 
+// SpecYAML handles GET /admin/openapi.yaml.
+func (h *AdminOpenAPIHandler) SpecYAML(w http.ResponseWriter, r *http.Request) {
+	spec := buildOpenAPISpec()
+	b, err := yaml.Marshal(spec)
+	if err != nil {
+		http.Error(w, "failed to marshal YAML", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/yaml")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(b)
+}
+
+// SpecJSON handles GET /docs/openapi.json (public, no auth).
+func (h *AdminOpenAPIHandler) SpecJSON(w http.ResponseWriter, r *http.Request) {
+	spec := buildOpenAPISpec()
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(spec)
+}
+
 // buildOpenAPISpec constructs an OpenAPI 3.0 document for the Admin API.
 func buildOpenAPISpec() map[string]any {
 	return map[string]any{
 		"openapi": "3.0.3",
 		"info": map[string]any{
-			"title":   "LLM Router Admin API",
-			"version": "1.0.0",
+			"title":       "LLM Router Admin API",
+			"version":     "1.0.0",
+			"description": "Gateway administration API for managing keys, routing, budgets, and observability.",
 		},
 		"security": []map[string]any{
 			{"bearerAuth": []string{}},
@@ -90,6 +115,13 @@ func buildOpenAPISpec() map[string]any {
 				"get": opSummary("Get a user"),
 				"put": opSummary("Update a user"),
 			},
+			"/admin/users/{user_id}/roles": map[string]any{
+				"post": opSummary("Assign a role to a user"),
+			},
+			// Roles
+			"/admin/roles": map[string]any{
+				"get": opSummary("List available roles"),
+			},
 			// Usage
 			"/admin/usage/summary": map[string]any{
 				"get": opSummary("Get usage summary for an entity"),
@@ -128,13 +160,74 @@ func buildOpenAPISpec() map[string]any {
 			"/admin/circuit-breakers/{provider}/reset": map[string]any{
 				"post": opSummary("Reset a circuit breaker"),
 			},
-			// Routing
+			// Routing (config)
 			"/admin/routing": map[string]any{
 				"get": opSummary("Get current routing configuration"),
 				"put": opSummary("Update routing configuration"),
 			},
 			"/admin/routing/reload": map[string]any{
 				"post": opSummary("Trigger hot reload of routing config"),
+			},
+			// Advanced routing rules
+			"/admin/routing/rules": map[string]any{
+				"get":  opSummary("List advanced routing rules"),
+				"post": opSummary("Create an advanced routing rule"),
+			},
+			"/admin/routing/rules/{id}": map[string]any{
+				"put":    opSummary("Update an advanced routing rule"),
+				"delete": opSummary("Delete an advanced routing rule"),
+			},
+			"/admin/routing/rules/reload": map[string]any{
+				"post": opSummary("Reload routing rules from DB"),
+			},
+			"/admin/routing/test": map[string]any{
+				"post": opSummary("Dry-run routing rule evaluation"),
+			},
+			// Cache
+			"/admin/cache/exact": map[string]any{
+				"delete": opSummary("Evict exact-match cache entries"),
+			},
+			"/admin/cache/exact/{hash}": map[string]any{
+				"get": opSummary("Get a cached entry by hash"),
+			},
+			// Audit logs
+			"/admin/audit-logs": map[string]any{
+				"get": opSummary("List audit log entries"),
+			},
+			"/admin/audit-logs/security-events": map[string]any{
+				"get": opSummary("List security-related audit events"),
+			},
+			// Alerts
+			"/admin/alerts/test": map[string]any{
+				"post": opSummary("Send a test alert to configured channels"),
+			},
+			"/admin/alerts/history": map[string]any{
+				"get": opSummary("List alert history"),
+			},
+			// Prompts
+			"/admin/prompts": map[string]any{
+				"get":  opSummary("List prompt templates"),
+				"post": opSummary("Create a prompt template"),
+			},
+			"/admin/prompts/{slug}": map[string]any{
+				"get":    opSummary("Get the active version of a prompt"),
+				"delete": opSummary("Archive a prompt"),
+			},
+			"/admin/prompts/{slug}/versions": map[string]any{
+				"get":  opSummary("List versions of a prompt"),
+				"post": opSummary("Publish a new version of a prompt"),
+			},
+			"/admin/prompts/{slug}/versions/{version}": map[string]any{
+				"get": opSummary("Get a specific prompt version"),
+			},
+			"/admin/prompts/{slug}/rollback/{version}": map[string]any{
+				"post": opSummary("Roll back a prompt to a previous version"),
+			},
+			"/admin/prompts/{slug}/render": map[string]any{
+				"post": opSummary("Render a prompt template with variables"),
+			},
+			"/admin/prompts/{slug}/diff": map[string]any{
+				"get": opSummary("Compare two versions of a prompt"),
 			},
 		},
 	}

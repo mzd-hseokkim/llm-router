@@ -31,6 +31,10 @@ type ChatCompletionRequest struct {
 	User             string            `json:"user,omitempty"`
 	Tools            []json.RawMessage `json:"tools,omitempty"`            // tool definitions
 	Metadata         map[string]string `json:"metadata,omitempty"`         // gateway routing metadata
+	// PromptSlug and PromptVariables are Gateway-specific fields consumed by the
+	// prompt injection middleware before the request is forwarded to a provider.
+	PromptSlug      string            `json:"prompt_slug,omitempty"`
+	PromptVariables map[string]string `json:"prompt_variables,omitempty"`
 }
 
 // ChatCompletionResponse is the OpenAI-compatible chat completions response.

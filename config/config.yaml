@@ -24,6 +24,24 @@ providers:
   gemini:
     api_key: ""
 
+  # Self-hosted inference servers (Ollama, vLLM, TGI, LMStudio).
+  # Uncomment and configure to enable local model routing.
+  # self_hosted:
+  #   - name: ollama_local
+  #     engine: ollama
+  #     base_url: http://localhost:11434
+  #     models:
+  #       - id: "ollama/llama3.2:3b"
+  #         model_name: "llama3.2:3b"
+  #         context_window: 131072
+  #   - name: vllm_cluster
+  #     engine: vllm
+  #     base_url: http://vllm-service:8000
+  #     models:
+  #       - id: "vllm/llama3.1-8b"
+  #         model_name: "meta-llama/Llama-3.1-8B-Instruct"
+  #         context_window: 131072
+
 # Gateway configuration.
 # Set master_key via env var MASTER_KEY (never commit real keys).
 # Set encryption_key via env var ENCRYPTION_KEY (32-byte base64, required for DB provider key storage).
