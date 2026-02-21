@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/llm-router/gateway/internal/gateway/fallback"
 	"github.com/llm-router/gateway/internal/gateway/handler"
 	"github.com/llm-router/gateway/internal/gateway/middleware"
 	"github.com/llm-router/gateway/internal/provider"
@@ -12,10 +13,21 @@ import (
 )
 
 // Setup registers all /v1 API routes on the given chi router.
-// authMw is the virtual-key middleware injected from main; it replaces the stub.
+// fr is the fallback router that handles circuit-breaker-gated failover.
+// chains are optional named fallback chains from routing config.
+// authMw is the virtual-key middleware injected from main.
 // logWriter, when non-nil, enables per-request DB logging.
 // recorder, when non-nil, receives provider health events for tracking.
-func Setup(r chi.Router, registry *provider.Registry, logger *slog.Logger, authMw func(http.Handler) http.Handler, logWriter *telemetry.LogWriter, recorder middleware.RequestRecorder) {
+func Setup(
+	r chi.Router,
+	registry *provider.Registry,
+	fr *fallback.Router,
+	chains []fallback.Chain,
+	logger *slog.Logger,
+	authMw func(http.Handler) http.Handler,
+	logWriter *telemetry.LogWriter,
+	recorder middleware.RequestRecorder,
+) {
 	r.Use(middleware.Recovery(logger))
 	r.Use(middleware.RequestMeta)
 
@@ -26,7 +38,7 @@ func Setup(r chi.Router, registry *provider.Registry, logger *slog.Logger, authM
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(authMw)
 
-		chat := handler.NewChatHandler(registry, logger)
+		chat := handler.NewChatHandler(fr, logger).WithChains(chains)
 		r.Post("/chat/completions", chat.Handle)
 
 		comp := handler.NewCompletionsHandler(registry, logger)

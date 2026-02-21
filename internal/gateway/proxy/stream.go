@@ -205,3 +205,90 @@ func newStreamID() string {
 	}
 	return fmt.Sprintf("chatcmpl-%x", b)
 }
+
+// StreamChannelToClient streams an already-opened provider channel to the HTTP client as SSE.
+// Use this when the stream has been opened by a FallbackRouter (so no retry/fallback is done here).
+func StreamChannelToClient(
+	w http.ResponseWriter,
+	r *http.Request,
+	chunks <-chan provider.StreamChunk,
+	model, providerName string,
+	logger *slog.Logger,
+) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported by server", http.StatusInternalServerError)
+		return
+	}
+
+	ctx := r.Context()
+
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	rc := http.NewResponseController(w)
+
+	id := newStreamID()
+	created := time.Now().Unix()
+
+	resetWriteDeadline(rc)
+	writeChunk(w, types.ChatCompletionChunk{
+		ID:      id,
+		Object:  "chat.completion.chunk",
+		Created: created,
+		Model:   model,
+		Choices: []types.ChunkChoice{{Index: 0, Delta: types.Delta{Role: "assistant"}}},
+	})
+	flusher.Flush()
+
+	ka := time.NewTicker(keepaliveInterval)
+	defer ka.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case <-ka.C:
+			resetWriteDeadline(rc)
+			fmt.Fprint(w, ": keepalive\n\n")
+			flusher.Flush()
+
+		case chunk, open := <-chunks:
+			if !open {
+				resetWriteDeadline(rc)
+				fmt.Fprint(w, "data: [DONE]\n\n")
+				flusher.Flush()
+				return
+			}
+
+			if chunk.Error != nil {
+				logger.Error("stream chunk error",
+					"provider", providerName,
+					"error", chunk.Error)
+				telemetry.SetError(ctx, "stream_error", chunk.Error.Error())
+				writeSSEError(w, chunk.Error.Error())
+				flusher.Flush()
+				return
+			}
+
+			if chunk.Delta != "" {
+				telemetry.RecordTTFT(ctx)
+			}
+			if chunk.Usage != nil {
+				telemetry.SetTokens(ctx, chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, chunk.Usage.TotalTokens)
+			}
+			if chunk.FinishReason != nil {
+				telemetry.SetFinishReason(ctx, *chunk.FinishReason)
+			}
+
+			resetWriteDeadline(rc)
+			writeChunk(w, buildChunk(id, created, model, chunk))
+			flusher.Flush()
+		}
+	}
+}

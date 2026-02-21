@@ -18,6 +18,7 @@ type Config struct {
 	Log       LogConfig       `koanf:"log"`
 	Providers ProvidersConfig `koanf:"providers"`
 	Gateway   GatewayConfig   `koanf:"gateway"`
+	Routing   RoutingConfig   `koanf:"routing"`
 }
 
 type GatewayConfig struct {
@@ -31,14 +32,67 @@ type GatewayConfig struct {
 }
 
 type ProvidersConfig struct {
-	OpenAI    ProviderConfig `koanf:"openai"`
-	Anthropic ProviderConfig `koanf:"anthropic"`
-	Gemini    ProviderConfig `koanf:"gemini"`
+	OpenAI    ProviderConfig       `koanf:"openai"`
+	Anthropic ProviderConfig       `koanf:"anthropic"`
+	Gemini    ProviderConfig       `koanf:"gemini"`
+	Azure     AzureProviderConfig  `koanf:"azure"`
+	Mistral   ProviderConfig       `koanf:"mistral"`
+	Cohere    ProviderConfig       `koanf:"cohere"`
+	Bedrock   BedrockProviderConfig `koanf:"bedrock"`
 }
 
 type ProviderConfig struct {
 	APIKey  string `koanf:"api_key"`
 	BaseURL string `koanf:"base_url"`
+}
+
+// AzureProviderConfig holds Azure OpenAI configuration.
+type AzureProviderConfig struct {
+	APIKey       string                   `koanf:"api_key"`
+	ResourceName string                   `koanf:"resource_name"`
+	APIVersion   string                   `koanf:"api_version"`
+	BaseURL      string                   `koanf:"base_url"` // optional override
+	Deployments  []AzureDeploymentConfig  `koanf:"deployments"`
+}
+
+// AzureDeploymentConfig maps a deployment ID to a model name.
+type AzureDeploymentConfig struct {
+	ID    string `koanf:"id"`
+	Model string `koanf:"model"`
+}
+
+// BedrockProviderConfig holds AWS Bedrock configuration.
+type BedrockProviderConfig struct {
+	Region          string `koanf:"region"`
+	AccessKeyID     string `koanf:"access_key_id"`
+	SecretAccessKey string `koanf:"secret_access_key"`
+	SessionToken    string `koanf:"session_token"`
+}
+
+// RoutingConfig holds circuit breaker and fallback chain configuration.
+type RoutingConfig struct {
+	CircuitBreaker CircuitBreakerConfig `koanf:"circuit_breaker"`
+	FallbackChains []FallbackChainConfig `koanf:"fallback_chains"`
+}
+
+// CircuitBreakerConfig holds circuit breaker thresholds.
+type CircuitBreakerConfig struct {
+	FailureThreshold int           `koanf:"failure_threshold"`
+	SuccessThreshold int           `koanf:"success_threshold"`
+	OpenTimeout      time.Duration `koanf:"open_timeout"`
+}
+
+// FallbackChainConfig defines a named fallback chain.
+type FallbackChainConfig struct {
+	Name    string               `koanf:"name"`
+	Targets []FallbackTargetConfig `koanf:"chain"`
+}
+
+// FallbackTargetConfig is one entry in a fallback chain.
+type FallbackTargetConfig struct {
+	Provider string `koanf:"provider"`
+	Model    string `koanf:"model"`
+	Weight   int    `koanf:"weight"`
 }
 
 type ServerConfig struct {
@@ -107,5 +161,20 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Log.Format == "" {
 		cfg.Log.Format = "json"
+	}
+	if cfg.Routing.CircuitBreaker.FailureThreshold == 0 {
+		cfg.Routing.CircuitBreaker.FailureThreshold = 5
+	}
+	if cfg.Routing.CircuitBreaker.SuccessThreshold == 0 {
+		cfg.Routing.CircuitBreaker.SuccessThreshold = 2
+	}
+	if cfg.Routing.CircuitBreaker.OpenTimeout == 0 {
+		cfg.Routing.CircuitBreaker.OpenTimeout = 60 * time.Second
+	}
+	if cfg.Providers.Azure.APIVersion == "" {
+		cfg.Providers.Azure.APIVersion = "2024-02-01"
+	}
+	if cfg.Providers.Bedrock.Region == "" {
+		cfg.Providers.Bedrock.Region = "us-east-1"
 	}
 }

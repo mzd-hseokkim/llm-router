@@ -11,6 +11,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/llm-router/gateway/internal/gateway/circuitbreaker"
+	"github.com/llm-router/gateway/internal/gateway/fallback"
 	"github.com/llm-router/gateway/internal/gateway/types"
 	"github.com/llm-router/gateway/internal/provider"
 )
@@ -43,6 +45,14 @@ func newTestRegistry(providers ...provider.Provider) *provider.Registry {
 		r.Register(p)
 	}
 	return r
+}
+
+// newTestHandler creates a ChatHandler backed by the given providers, using a default circuit breaker.
+func newTestHandler(providers ...provider.Provider) *ChatHandler {
+	reg := newTestRegistry(providers...)
+	cb := circuitbreaker.New(circuitbreaker.DefaultConfig())
+	fr := fallback.NewRouter(reg, cb, discardLogger())
+	return NewChatHandler(fr, discardLogger())
 }
 
 // --- parseModel ---
@@ -222,7 +232,7 @@ func postJSON(t *testing.T, h *ChatHandler, body any) *httptest.ResponseRecorder
 
 func TestChatHandler_StatusCodes(t *testing.T) {
 	mock := &mockProvider{name: "mock", resp: mockResponse("mock/model")}
-	h := NewChatHandler(newTestRegistry(mock), discardLogger())
+	h := newTestHandler(mock)
 
 	tests := []struct {
 		name       string
@@ -258,7 +268,7 @@ func TestChatHandler_StatusCodes(t *testing.T) {
 				"model":    "unknown/model",
 				"messages": []map[string]string{{"role": "user", "content": "Hello"}},
 			},
-			wantStatus: http.StatusBadRequest,
+			wantStatus: http.StatusBadGateway, // all fallbacks exhausted
 		},
 		{
 			name: "temperature out of range",
@@ -284,7 +294,7 @@ func TestChatHandler_StatusCodes(t *testing.T) {
 func TestChatHandler_ResponseBody(t *testing.T) {
 	expected := mockResponse("mock/model")
 	mock := &mockProvider{name: "mock", resp: expected}
-	h := NewChatHandler(newTestRegistry(mock), discardLogger())
+	h := newTestHandler(mock)
 
 	w := postJSON(t, h, map[string]any{
 		"model":    "mock/model",
@@ -317,7 +327,7 @@ func TestChatHandler_ResponseBody(t *testing.T) {
 }
 
 func TestChatHandler_ErrorResponseFormat(t *testing.T) {
-	h := NewChatHandler(newTestRegistry(), discardLogger())
+	h := newTestHandler() // no providers
 
 	// missing model triggers a 400 with OpenAI error format
 	w := postJSON(t, h, map[string]any{
@@ -342,7 +352,7 @@ func TestChatHandler_ErrorResponseFormat(t *testing.T) {
 
 func TestChatHandler_ContentTypeJSON(t *testing.T) {
 	mock := &mockProvider{name: "mock", resp: mockResponse("mock/model")}
-	h := NewChatHandler(newTestRegistry(mock), discardLogger())
+	h := newTestHandler(mock)
 
 	w := postJSON(t, h, map[string]any{
 		"model":    "mock/model",
@@ -357,7 +367,7 @@ func TestChatHandler_ContentTypeJSON(t *testing.T) {
 
 func TestChatHandler_ProviderError(t *testing.T) {
 	mock := &mockProvider{name: "mock", err: fmt.Errorf("upstream timeout")}
-	h := NewChatHandler(newTestRegistry(mock), discardLogger())
+	h := newTestHandler(mock)
 
 	w := postJSON(t, h, map[string]any{
 		"model":    "mock/model",
@@ -379,7 +389,7 @@ func TestChatHandler_ProviderError(t *testing.T) {
 
 func TestChatHandler_Streaming(t *testing.T) {
 	mock := &mockProvider{name: "mock", resp: mockResponse("mock/model")}
-	h := NewChatHandler(newTestRegistry(mock), discardLogger())
+	h := newTestHandler(mock)
 
 	body, _ := json.Marshal(map[string]any{
 		"model":    "mock/model",

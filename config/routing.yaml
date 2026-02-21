@@ -1,0 +1,38 @@
+# config/routing.yaml — Fallback chain and circuit breaker configuration
+#
+# This file is loaded alongside config.yaml.
+# All settings can be overridden via the routing: section in config.yaml as well.
+
+routing:
+  # Circuit breaker thresholds (per provider)
+  circuit_breaker:
+    failure_threshold: 5   # consecutive fallback failures to open the circuit
+    success_threshold: 2   # consecutive successes in HalfOpen to recover
+    open_timeout: 60s      # time before probing again (Open → HalfOpen)
+
+  # Named fallback chains.
+  # When a client request model matches a chain name, the chain is used.
+  # Otherwise, the "provider/model" prefix in the model field is used directly.
+  fallback_chains:
+    - name: "default"
+      chain:
+        - provider: openai
+          model: gpt-4o
+          weight: 100
+        - provider: anthropic
+          model: claude-sonnet-4-20250514
+          weight: 100
+        - provider: gemini
+          model: gemini-2.0-flash
+          weight: 100
+
+    # Example: 70/30 split between OpenAI and Azure for GPT-4o requests.
+    # Use model: "gpt4o-balanced" in the client to hit this chain.
+    # - name: "gpt4o-balanced"
+    #   chain:
+    #     - provider: openai
+    #       model: gpt-4o
+    #       weight: 70
+    #     - provider: azure
+    #       model: gpt-4o-prod
+    #       weight: 30

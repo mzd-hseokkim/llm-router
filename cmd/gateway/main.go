@@ -14,13 +14,19 @@ import (
 	"github.com/llm-router/gateway/internal/auth"
 	"github.com/llm-router/gateway/internal/config"
 	"github.com/llm-router/gateway/internal/crypto"
+	"github.com/llm-router/gateway/internal/gateway/circuitbreaker"
+	"github.com/llm-router/gateway/internal/gateway/fallback"
 	"github.com/llm-router/gateway/internal/gateway/handler"
 	"github.com/llm-router/gateway/internal/gateway/router"
 	"github.com/llm-router/gateway/internal/health"
 	internalhandler "github.com/llm-router/gateway/internal/handler"
 	"github.com/llm-router/gateway/internal/provider"
 	provideranthropic "github.com/llm-router/gateway/internal/provider/anthropic"
+	providerazure "github.com/llm-router/gateway/internal/provider/azure"
+	providerbedrock "github.com/llm-router/gateway/internal/provider/bedrock"
+	providercohere "github.com/llm-router/gateway/internal/provider/cohere"
 	providergemini "github.com/llm-router/gateway/internal/provider/gemini"
+	providermistral "github.com/llm-router/gateway/internal/provider/mistral"
 	provideropenai "github.com/llm-router/gateway/internal/provider/openai"
 	"github.com/llm-router/gateway/internal/server"
 	pgstore "github.com/llm-router/gateway/internal/store/postgres"
@@ -68,11 +74,22 @@ func main() {
 	km, cipher := buildKeyManager(pool, cfg, logger)
 
 	// --- Providers ---
-	registry := provider.NewRegistry()
-	registry.Register(provideropenai.NewManaged(km, cfg.Providers.OpenAI.BaseURL))
-	registry.Register(provideranthropic.NewManaged(km, cfg.Providers.Anthropic.BaseURL))
-	registry.Register(providergemini.NewManaged(km, cfg.Providers.Gemini.BaseURL))
-	logger.Info("providers registered", "count", 3)
+	registry := buildRegistry(km, cfg)
+	logger.Info("providers registered", "count", len(registry.AllProviders()))
+
+	// --- Circuit Breaker ---
+	cbCfg := circuitbreaker.Config{
+		FailureThreshold: cfg.Routing.CircuitBreaker.FailureThreshold,
+		SuccessThreshold: cfg.Routing.CircuitBreaker.SuccessThreshold,
+		OpenTimeout:      cfg.Routing.CircuitBreaker.OpenTimeout,
+	}
+	cb := circuitbreaker.New(cbCfg)
+
+	// --- Fallback Router ---
+	fr := fallback.NewRouter(registry, cb, logger)
+
+	// Build named fallback chains from config.
+	chains := buildFallbackChains(cfg)
 
 	// --- Request logging ---
 	logStore := pgstore.NewLogStore(pool)
@@ -91,7 +108,7 @@ func main() {
 	r := srv.Router()
 
 	// /v1 routes — protected by virtual key auth
-	router.Setup(r, registry, logger, authMw.Middleware, logWriter, tracker)
+	router.Setup(r, registry, fr, chains, logger, authMw.Middleware, logWriter, tracker)
 
 	// /ping — unauthenticated liveness stub (kept for backwards compatibility)
 	r.Get("/ping", internalhandler.Ping())
@@ -106,7 +123,7 @@ func main() {
 	r.Handle("/metrics", promhttp.Handler())
 
 	// /admin/* — protected by master key
-	registerAdminRoutes(r, keyStore, keyCache, km, cipher, pool, logStore, cfg, logger)
+	registerAdminRoutes(r, keyStore, keyCache, km, cipher, pool, logStore, cb, cfg, logger)
 
 	if err := srv.ListenAndServe(context.Background()); err != nil {
 		logger.Error("server exited with error", "error", err)
@@ -114,18 +131,87 @@ func main() {
 	}
 }
 
+// buildRegistry registers all configured providers.
+func buildRegistry(km *provider.KeyManager, cfg *config.Config) *provider.Registry {
+	registry := provider.NewRegistry()
+
+	registry.Register(provideropenai.NewManaged(km, cfg.Providers.OpenAI.BaseURL))
+	registry.Register(provideranthropic.NewManaged(km, cfg.Providers.Anthropic.BaseURL))
+	registry.Register(providergemini.NewManaged(km, cfg.Providers.Gemini.BaseURL))
+
+	if cfg.Providers.Mistral.APIKey != "" || cfg.Providers.Mistral.BaseURL != "" {
+		registry.Register(providermistral.NewManaged(km, cfg.Providers.Mistral.BaseURL))
+	}
+
+	if cfg.Providers.Cohere.APIKey != "" || cfg.Providers.Cohere.BaseURL != "" {
+		registry.Register(providercohere.NewManaged(km, cfg.Providers.Cohere.BaseURL))
+	}
+
+	if cfg.Providers.Azure.ResourceName != "" || cfg.Providers.Azure.BaseURL != "" {
+		deps := make([]providerazure.DeploymentConfig, 0, len(cfg.Providers.Azure.Deployments))
+		for _, d := range cfg.Providers.Azure.Deployments {
+			deps = append(deps, providerazure.DeploymentConfig{ID: d.ID, Model: d.Model})
+		}
+		azureCfg := providerazure.Config{
+			ResourceName: cfg.Providers.Azure.ResourceName,
+			APIKey:       cfg.Providers.Azure.APIKey,
+			APIVersion:   cfg.Providers.Azure.APIVersion,
+			BaseURL:      cfg.Providers.Azure.BaseURL,
+			Deployments:  deps,
+		}
+		registry.Register(providerazure.NewManaged(km, azureCfg))
+	}
+
+	if cfg.Providers.Bedrock.AccessKeyID != "" {
+		bedrockCfg := providerbedrock.Config{
+			Region: cfg.Providers.Bedrock.Region,
+			Auth: providerbedrock.AuthConfig{
+				AccessKeyID:     cfg.Providers.Bedrock.AccessKeyID,
+				SecretAccessKey: cfg.Providers.Bedrock.SecretAccessKey,
+				SessionToken:    cfg.Providers.Bedrock.SessionToken,
+			},
+		}
+		registry.Register(providerbedrock.New(bedrockCfg))
+	}
+
+	return registry
+}
+
+// buildFallbackChains converts routing config to fallback.Chain objects.
+func buildFallbackChains(cfg *config.Config) []fallback.Chain {
+	chains := make([]fallback.Chain, 0, len(cfg.Routing.FallbackChains))
+	for _, fc := range cfg.Routing.FallbackChains {
+		targets := make([]fallback.Target, 0, len(fc.Targets))
+		for _, t := range fc.Targets {
+			targets = append(targets, fallback.Target{
+				Provider: t.Provider,
+				Model:    t.Model,
+				Weight:   t.Weight,
+			})
+		}
+		chains = append(chains, fallback.Chain{
+			Name:    fc.Name,
+			Targets: targets,
+		})
+	}
+	return chains
+}
+
 // buildKeyManager creates a KeyManager.
 // Returns (km, cipher); cipher is nil if ENCRYPTION_KEY is not configured.
 func buildKeyManager(pool *pgxpool.Pool, cfg *config.Config, logger *slog.Logger) (*provider.KeyManager, *crypto.Cipher) {
-	fallback := map[string]string{
+	fallbackKeys := map[string]string{
 		"openai":    cfg.Providers.OpenAI.APIKey,
 		"anthropic": cfg.Providers.Anthropic.APIKey,
 		"gemini":    cfg.Providers.Gemini.APIKey,
+		"mistral":   cfg.Providers.Mistral.APIKey,
+		"cohere":    cfg.Providers.Cohere.APIKey,
+		"azure":     cfg.Providers.Azure.APIKey,
 	}
 
 	if cfg.Gateway.EncryptionKey == "" {
 		logger.Warn("ENCRYPTION_KEY not set; DB provider key storage disabled, using config file keys only")
-		return provider.NewKeyManager(nil, nil, fallback), nil
+		return provider.NewKeyManager(nil, nil, fallbackKeys), nil
 	}
 
 	keyBytes, err := base64.StdEncoding.DecodeString(cfg.Gateway.EncryptionKey)
@@ -141,7 +227,7 @@ func buildKeyManager(pool *pgxpool.Pool, cfg *config.Config, logger *slog.Logger
 	}
 
 	providerKeyStore := pgstore.NewProviderKeyStore(pool)
-	km := provider.NewKeyManager(providerKeyStore, cipher, fallback)
+	km := provider.NewKeyManager(providerKeyStore, cipher, fallbackKeys)
 	logger.Info("provider key manager initialised with DB store")
 	return km, cipher
 }
@@ -155,6 +241,7 @@ func registerAdminRoutes(
 	cipher *crypto.Cipher,
 	pool *pgxpool.Pool,
 	logStore *pgstore.LogStore,
+	cb *circuitbreaker.CircuitBreaker,
 	cfg *config.Config,
 	logger *slog.Logger,
 ) {
@@ -186,6 +273,11 @@ func registerAdminRoutes(
 		// Request log query
 		logsHandler := handler.NewAdminLogsHandler(logStore)
 		r.Get("/admin/logs", logsHandler.List)
+
+		// Circuit breaker admin endpoints
+		cbHandler := handler.NewAdminCircuitBreakerHandler(cb, logger)
+		r.Get("/admin/circuit-breakers", cbHandler.List)
+		r.Post("/admin/circuit-breakers/{provider}/reset", cbHandler.Reset)
 	})
 }
 
@@ -199,6 +291,24 @@ func applyEnvKeys(cfg *config.Config) {
 	}
 	if v := os.Getenv("GEMINI_API_KEY"); v != "" {
 		cfg.Providers.Gemini.APIKey = v
+	}
+	if v := os.Getenv("MISTRAL_API_KEY"); v != "" {
+		cfg.Providers.Mistral.APIKey = v
+	}
+	if v := os.Getenv("COHERE_API_KEY"); v != "" {
+		cfg.Providers.Cohere.APIKey = v
+	}
+	if v := os.Getenv("AZURE_API_KEY"); v != "" {
+		cfg.Providers.Azure.APIKey = v
+	}
+	if v := os.Getenv("AWS_ACCESS_KEY_ID"); v != "" {
+		cfg.Providers.Bedrock.AccessKeyID = v
+	}
+	if v := os.Getenv("AWS_SECRET_ACCESS_KEY"); v != "" {
+		cfg.Providers.Bedrock.SecretAccessKey = v
+	}
+	if v := os.Getenv("AWS_SESSION_TOKEN"); v != "" {
+		cfg.Providers.Bedrock.SessionToken = v
 	}
 	if v := os.Getenv("MASTER_KEY"); v != "" {
 		cfg.Gateway.MasterKey = v

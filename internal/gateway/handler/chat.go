@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/llm-router/gateway/internal/gateway/fallback"
 	"github.com/llm-router/gateway/internal/gateway/proxy"
-	"github.com/llm-router/gateway/internal/gateway/retry"
 	"github.com/llm-router/gateway/internal/gateway/types"
 	"github.com/llm-router/gateway/internal/provider"
 	"github.com/llm-router/gateway/internal/telemetry"
@@ -18,13 +18,26 @@ import (
 
 // ChatHandler handles POST /v1/chat/completions.
 type ChatHandler struct {
-	registry *provider.Registry
-	logger   *slog.Logger
+	fallbackRouter *fallback.Router
+	chains         map[string]fallback.Chain // name → chain, from routing config
+	logger         *slog.Logger
 }
 
-// NewChatHandler returns a ChatHandler wired to the given provider registry.
-func NewChatHandler(registry *provider.Registry, logger *slog.Logger) *ChatHandler {
-	return &ChatHandler{registry: registry, logger: logger}
+// NewChatHandler returns a ChatHandler wired to the given fallback router.
+func NewChatHandler(fr *fallback.Router, logger *slog.Logger) *ChatHandler {
+	return &ChatHandler{
+		fallbackRouter: fr,
+		chains:         make(map[string]fallback.Chain),
+		logger:         logger,
+	}
+}
+
+// WithChains attaches named fallback chains (loaded from routing config).
+func (h *ChatHandler) WithChains(chains []fallback.Chain) *ChatHandler {
+	for _, c := range chains {
+		h.chains[c.Name] = c
+	}
+	return h
 }
 
 // Handle processes a chat completions request.
@@ -46,33 +59,27 @@ func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	parsed := parseModel(req.Model)
-	p, ok := h.registry.Get(parsed.Provider)
-	if !ok {
+	chain := h.resolveChain(req.Model)
+	if len(chain.Targets) == 0 {
 		writeError(w, http.StatusBadRequest,
-			fmt.Sprintf("Invalid model: %s", req.Model),
+			fmt.Sprintf("no provider available for model: %s", req.Model),
 			"invalid_request_error", "model_not_found")
 		return
 	}
 
-	telemetry.SetModel(r.Context(), req.Model, parsed.Provider)
+	// Set primary provider for telemetry (first target in chain).
+	telemetry.SetModel(r.Context(), req.Model, chain.Targets[0].Provider)
 
 	if req.Stream {
 		telemetry.SetStreaming(r.Context())
-		h.handleStream(w, r, &req, body, p, parsed)
+		h.handleStream(w, r, &req, body, chain)
 		return
 	}
 
-	var resp *types.ChatCompletionResponse
-	err = retry.Execute(r.Context(), retry.Default(), func() error {
-		var e error
-		resp, e = p.ChatCompletion(r.Context(), parsed.Model, &req, body)
-		return e
-	})
+	resp, used, err := h.fallbackRouter.Execute(r.Context(), chain, &req, body)
 	if err != nil {
-		h.logger.Error("provider chat completion failed",
-			"provider", parsed.Provider,
-			"model", parsed.Model,
+		h.logger.Error("chat completion failed",
+			"chain", chain.Name,
 			"error", err)
 		var gwErr *provider.GatewayError
 		if errors.As(err, &gwErr) {
@@ -85,6 +92,11 @@ func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Update telemetry with the actual provider used (may differ from primary after fallback).
+	if used.Provider != chain.Targets[0].Provider {
+		telemetry.SetModel(r.Context(), req.Model, used.Provider)
+	}
+
 	if resp.Usage != nil {
 		telemetry.SetTokens(r.Context(), resp.Usage.PromptTokens, resp.Usage.CompletionTokens, resp.Usage.TotalTokens)
 	}
@@ -95,9 +107,57 @@ func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// handleStream proxies a streaming chat completion to the client.
-func (h *ChatHandler) handleStream(w http.ResponseWriter, r *http.Request, req *types.ChatCompletionRequest, body []byte, p provider.Provider, parsed types.ParsedModel) {
-	proxy.StreamToClient(w, r, p, parsed, req, body, h.logger)
+// handleStream proxies a streaming chat completion with fallback support.
+func (h *ChatHandler) handleStream(w http.ResponseWriter, r *http.Request, req *types.ChatCompletionRequest, body []byte, chain fallback.Chain) {
+	ch, used, err := h.fallbackRouter.ExecuteStream(r.Context(), chain, req, body)
+	if err != nil {
+		h.logger.Error("stream init failed",
+			"chain", chain.Name,
+			"error", err)
+		var gwErr *provider.GatewayError
+		if errors.As(err, &gwErr) {
+			telemetry.SetError(r.Context(), string(gwErr.Code), gwErr.Message)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(gwErr.HTTPStatus)
+			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+				"error": map[string]string{
+					"message": gwErr.Message,
+					"type":    string(gwErr.Code),
+				},
+			})
+		} else {
+			telemetry.SetError(r.Context(), "stream_error", err.Error())
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+				"error": map[string]string{
+					"message": err.Error(),
+					"type":    "api_error",
+				},
+			})
+		}
+		return
+	}
+
+	if used.Provider != chain.Targets[0].Provider {
+		telemetry.SetModel(r.Context(), req.Model, used.Provider)
+	}
+
+	proxy.StreamChannelToClient(w, r, ch, req.Model, used.Provider, h.logger)
+}
+
+// resolveChain determines the fallback chain for the given model string.
+// If the model matches a configured chain name, that chain is used.
+// Otherwise, a single-target chain is built from the "provider/model" prefix.
+func (h *ChatHandler) resolveChain(model string) fallback.Chain {
+	// Check named chains first (e.g. "default").
+	if c, ok := h.chains[model]; ok {
+		return c
+	}
+
+	// Parse "provider/model" format.
+	parsed := parseModel(model)
+	return fallback.SingleTarget(parsed.Provider, parsed.Model)
 }
 
 // validateChatRequest checks required fields and value ranges.
