@@ -48,3 +48,11 @@ docker/volumes/
 
 # Build artifacts
 dist/
+
+# Admin UI (Next.js)
+admin-ui/node_modules/
+admin-ui/.next/
+admin-ui/out/
+admin-ui/.env
+admin-ui/.env.local
+admin-ui/.env.*.local
