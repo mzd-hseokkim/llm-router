@@ -209,9 +209,21 @@ func (h *AuthHandler) SessionMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		// Auto-renew near expiry
+		// Auto-renew near expiry and refresh the browser cookie so its
+		// Expires matches the extended Redis TTL.
 		if sess.NeedsRenewal() {
-			_ = h.sessions.Renew(r.Context(), sess.ID)
+			if renewed, err := h.sessions.Renew(r.Context(), sess.ID); err == nil && renewed != nil {
+				http.SetCookie(w, &http.Cookie{
+					Name:     sessionCookie,
+					Value:    sess.ID,
+					Path:     "/",
+					HttpOnly: true,
+					Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+					SameSite: http.SameSiteStrictMode,
+					Expires:  renewed.ExpiresAt,
+				})
+				sess = renewed
+			}
 		}
 
 		// Load user roles and inject UserInfo
@@ -314,6 +326,18 @@ func (h *AdminRolesHandler) AssignRole(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, `{"error":"role not found"}`, http.StatusNotFound)
 		return
+	}
+
+	// Privilege escalation guard: only super_admin can assign roles that carry
+	// PermAll or system-management permissions.
+	callerUI := rbac.UserFromContext(r.Context())
+	if !callerUI.HasPermission(rbac.PermAll, "", "") {
+		for _, p := range role.Permissions {
+			if p == rbac.PermAll || p == rbac.PermManageSystem || p == rbac.PermManageProviders {
+				http.Error(w, `{"error":"forbidden: insufficient privileges to assign this role"}`, http.StatusForbidden)
+				return
+			}
+		}
 	}
 
 	if err := h.roleStore.AssignRole(r.Context(), userID, role.ID, orgID, teamID); err != nil {

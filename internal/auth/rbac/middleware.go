@@ -3,8 +3,6 @@ package rbac
 import (
 	"context"
 	"net/http"
-
-	"github.com/google/uuid"
 )
 
 type ctxKey int
@@ -73,24 +71,16 @@ func RequireRole(roles ...Role) func(http.Handler) http.Handler {
 
 // orgTeamFromCtx extracts tenant scope from context (set by tenant middleware).
 // Returns empty strings if not present.
+// These string keys must match OrgIDCtxKey / TeamIDCtxKey in internal/tenant/context.go.
 func orgTeamFromCtx(ctx context.Context) (orgID, teamID string) {
-	type tenantCtx interface {
-		OrgID() uuid.UUID
-		TeamID() uuid.UUID
-	}
-	// We use string keys to avoid import cycles; tenant middleware sets these.
-	if v := ctx.Value(ctxOrgID); v != nil {
-		orgID = v.(string)
-	}
-	if v := ctx.Value(ctxTeamID); v != nil {
-		teamID = v.(string)
-	}
+	orgID, _ = ctx.Value(orgIDCtxKey).(string)
+	teamID, _ = ctx.Value(teamIDCtxKey).(string)
 	return
 }
 
-// These keys are shared with the tenant package via this file.
-// Using typed constants avoids import cycles between rbac and tenant.
+// orgIDCtxKey / teamIDCtxKey must match tenant.OrgIDCtxKey / tenant.TeamIDCtxKey.
+// Using string keys avoids the import cycle (tenant→rbac already exists).
 const (
-	ctxOrgID  = ctxKey(10)
-	ctxTeamID = ctxKey(11)
+	orgIDCtxKey  = "llm-router:org_id"
+	teamIDCtxKey = "llm-router:team_id"
 )

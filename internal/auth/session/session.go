@@ -97,17 +97,21 @@ func (s *Store) Get(ctx context.Context, id string) (*Session, error) {
 }
 
 // Renew extends the session TTL if it is close to expiry.
-func (s *Store) Renew(ctx context.Context, id string) error {
+// Returns the updated session so callers can refresh the browser cookie.
+func (s *Store) Renew(ctx context.Context, id string) (*Session, error) {
 	sess, err := s.Get(ctx, id)
 	if err != nil || sess == nil {
-		return err
+		return nil, err
 	}
 	if !sess.NeedsRenewal() {
-		return nil
+		return sess, nil
 	}
 	sess.ExpiresAt = time.Now().UTC().Add(s.ttl)
 	data, _ := json.Marshal(sess)
-	return s.rdb.Set(ctx, redisKey(id), data, s.ttl).Err()
+	if err := s.rdb.Set(ctx, redisKey(id), data, s.ttl).Err(); err != nil {
+		return nil, err
+	}
+	return sess, nil
 }
 
 // Delete removes a session (logout).

@@ -38,34 +38,31 @@ func GuardrailCheck(pipeline *guardrail.Pipeline) func(http.Handler) http.Handle
 				return
 			}
 
-			// Collect all user message content for input guardrail check
-			var userText strings.Builder
+			// Check each user message independently so PII masking is applied
+			// per-message and previous messages are not left unmasked.
+			bodyChanged := false
 			for i, m := range req.Messages {
-				if m.Role == "user" {
-					if i > 0 {
-						userText.WriteByte('\n')
-					}
-					userText.WriteString(m.Content)
+				if m.Role != "user" || m.Content == "" {
+					continue
 				}
-			}
-
-			if userText.Len() > 0 {
-				modified, blockErr, err := pipeline.CheckInput(r.Context(), userText.String())
+				modified, blockErr, err := pipeline.CheckInput(r.Context(), m.Content)
 				if err == nil && blockErr != nil {
 					writeGuardrailError(w, blockErr)
 					return
 				}
-				// If text was masked, rebuild messages with masked content
-				if err == nil && modified != userText.String() {
-					req = applyMaskedText(req, modified)
-					newBody, _ := json.Marshal(req)
-					r.Body = io.NopCloser(bytes.NewReader(newBody))
+				if err == nil && modified != m.Content {
+					req.Messages[i].Content = modified
+					bodyChanged = true
 				}
+			}
+			if bodyChanged {
+				newBody, _ := json.Marshal(req)
+				r.Body = io.NopCloser(bytes.NewReader(newBody))
 			}
 
 			// For non-streaming with output guardrails: wrap ResponseWriter
 			if !req.Stream && pipeline.HasOutput() {
-				rw := &responseCapture{ResponseWriter: w, body: &bytes.Buffer{}}
+				rw := &responseCapture{ResponseWriter: w, body: &bytes.Buffer{}, statusCode: http.StatusOK}
 				next.ServeHTTP(rw, r)
 				outputText := rw.body.String()
 				if outputText != "" {
@@ -87,20 +84,6 @@ func GuardrailCheck(pipeline *guardrail.Pipeline) func(http.Handler) http.Handle
 			next.ServeHTTP(w, r)
 		})
 	}
-}
-
-// applyMaskedText replaces user message content with the masked combined text.
-// Simple approach: distribute masked text back proportionally is complex,
-// so we replace the last user message with the full masked text.
-func applyMaskedText(req types.ChatCompletionRequest, masked string) types.ChatCompletionRequest {
-	// Find the last user message and replace it
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if req.Messages[i].Role == "user" {
-			req.Messages[i].Content = masked
-			break
-		}
-	}
-	return req
 }
 
 // responseCapture buffers a non-streaming response for output guardrail inspection.

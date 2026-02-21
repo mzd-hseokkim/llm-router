@@ -29,8 +29,8 @@ func Middleware(resolver Resolver) func(http.Handler) http.Handler {
 
 			orgID, teamID, err := resolver.ResolveForUser(r.Context(), ui.ID)
 			if err != nil {
-				// Proceed without tenant context rather than failing hard
-				next.ServeHTTP(w, r)
+				// Fail closed: an unknown tenant scope must not silently bypass org isolation.
+				http.Error(w, `{"error":"internal error resolving tenant"}`, http.StatusInternalServerError)
 				return
 			}
 
