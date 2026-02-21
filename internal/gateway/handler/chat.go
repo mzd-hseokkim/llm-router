@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,9 +18,16 @@ import (
 	"github.com/llm-router/gateway/internal/telemetry"
 )
 
+// advancedResolver is the interface for the advanced routing engine.
+// Kept as an interface here to avoid an import cycle with the router package.
+type advancedResolver interface {
+	Resolve(ctx context.Context, req *types.ChatCompletionRequest) (fallback.Chain, bool)
+}
+
 // ChatHandler handles POST /v1/chat/completions.
 type ChatHandler struct {
 	fallbackRouter *fallback.Router
+	advRouter      advancedResolver // optional advanced routing engine
 	mu             sync.RWMutex
 	chains         map[string]fallback.Chain // name → chain, from routing config
 	logger         *slog.Logger
@@ -32,6 +40,13 @@ func NewChatHandler(fr *fallback.Router, logger *slog.Logger) *ChatHandler {
 		chains:         make(map[string]fallback.Chain),
 		logger:         logger,
 	}
+}
+
+// WithAdvancedRouter attaches an optional advanced routing engine.
+// The engine takes precedence over the named-chain config routing.
+func (h *ChatHandler) WithAdvancedRouter(ar advancedResolver) *ChatHandler {
+	h.advRouter = ar
+	return h
 }
 
 // WithChains attaches named fallback chains (loaded from routing config).
@@ -71,7 +86,14 @@ func (h *ChatHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	chain := h.resolveChain(req.Model)
+	// Advanced routing takes precedence over named-chain config routing.
+	chain, resolved := fallback.Chain{}, false
+	if h.advRouter != nil {
+		chain, resolved = h.advRouter.Resolve(r.Context(), &req)
+	}
+	if !resolved {
+		chain = h.resolveChain(req.Model)
+	}
 	if len(chain.Targets) == 0 {
 		writeError(w, http.StatusBadRequest,
 			fmt.Sprintf("no provider available for model: %s", req.Model),

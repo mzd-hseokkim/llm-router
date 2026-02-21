@@ -66,16 +66,16 @@ tasks/
 
 | # | 작업 | 핵심 내용 |
 |---|------|----------|
-| 01 | [멀티테넌시](phase3-enterprise/01-multi-tenancy.md) | Org > Team > User > Key 4단계 계층 |
-| 02 | [RBAC](phase3-enterprise/02-rbac.md) | 역할 기반 접근 제어, 커스텀 역할 |
-| 03 | [OAuth/SSO](phase3-enterprise/03-oauth-sso.md) | Google·GitHub·Okta·커스텀 OIDC |
-| 04 | [가드레일](phase3-enterprise/04-guardrails.md) | PII 마스킹, 프롬프트 인젝션, 컨텐츠 필터 |
-| 05 | [정확 매칭 캐싱](phase3-enterprise/05-exact-caching.md) | Redis 기반 완전 일치 캐시, 스트리밍 재생 |
-| 06 | [시맨틱 캐싱](phase3-enterprise/06-semantic-caching.md) | 임베딩 + pgvector 코사인 유사도 검색 |
-| 07 | [고급 라우팅](phase3-enterprise/07-advanced-routing.md) | 메타데이터·컨텍스트 길이·시간 조건부 규칙 |
-| 08 | [관측성](phase3-enterprise/08-observability.md) | OpenTelemetry 트레이싱, Prometheus 메트릭 |
-| 09 | [감사 로그](phase3-enterprise/09-audit-log.md) | 불변 감사 추적, 규제 준수 보존 정책 |
-| 10 | [알림 시스템](phase3-enterprise/10-alerting.md) | Slack·Email·Webhook, 중복 방지 |
+| 01 | ✅ [멀티테넌시](phase3-enterprise/01-multi-tenancy.md) | Org > Team > User > Key 4단계 계층 |
+| 02 | ✅ [RBAC](phase3-enterprise/02-rbac.md) | 역할 기반 접근 제어, 커스텀 역할 |
+| 03 | ✅ [OAuth/SSO](phase3-enterprise/03-oauth-sso.md) | Google·GitHub·Okta·커스텀 OIDC |
+| 04 | ✅ [가드레일](phase3-enterprise/04-guardrails.md) | PII 마스킹, 프롬프트 인젝션, 컨텐츠 필터 |
+| 05 | ✅ [정확 매칭 캐싱](phase3-enterprise/05-exact-caching.md) | Redis 기반 완전 일치 캐시, 스트리밍 재생 |
+| 06 | ✅ [시맨틱 캐싱](phase3-enterprise/06-semantic-caching.md) | 임베딩 + pgvector 코사인 유사도 검색 |
+| 07 | ✅ [고급 라우팅](phase3-enterprise/07-advanced-routing.md) | 메타데이터·컨텍스트 길이·시간 조건부 규칙 |
+| 08 | ✅ [관측성](phase3-enterprise/08-observability.md) | OpenTelemetry 트레이싱, Prometheus 메트릭 |
+| 09 | ✅ [감사 로그](phase3-enterprise/09-audit-log.md) | 불변 감사 추적, 규제 준수 보존 정책 |
+| 10 | ✅ [알림 시스템](phase3-enterprise/10-alerting.md) | Slack·Email·Webhook, 중복 방지 |
 
 **Phase 3 완료 기준**: 복수 조직·팀이 격리된 환경에서 안전하게 사용, SOC2 수준 감사 추적 가능
 

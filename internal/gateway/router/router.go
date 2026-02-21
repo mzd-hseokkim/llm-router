@@ -10,6 +10,7 @@ import (
 	"github.com/llm-router/gateway/internal/gateway/fallback"
 	"github.com/llm-router/gateway/internal/gateway/handler"
 	"github.com/llm-router/gateway/internal/gateway/middleware"
+	"github.com/llm-router/gateway/internal/guardrail"
 	"github.com/llm-router/gateway/internal/provider"
 	"github.com/llm-router/gateway/internal/ratelimit"
 	"github.com/llm-router/gateway/internal/telemetry"
@@ -30,6 +31,9 @@ func Setup(
 	rateLimiter ratelimit.Limiter,
 	budgetMgr *budget.Manager,
 	costCalc *cost.Calculator,
+	cacheMw *middleware.CacheMiddleware,
+	guardrailPipeline *guardrail.Pipeline,
+	advancedRouter *AdvancedRouter,
 ) *handler.ChatHandler {
 	r.Use(middleware.Recovery(logger))
 	r.Use(middleware.RequestMeta)
@@ -50,7 +54,20 @@ func Setup(
 			r.Use(middleware.BudgetCheck(budgetMgr, costCalc, logger))
 		}
 
+		// Cache middleware (before guardrails so cached responses skip guardrail processing)
+		if cacheMw != nil {
+			r.Use(cacheMw.Handler())
+		}
+
+		// Guardrail middleware
+		if guardrailPipeline != nil {
+			r.Use(middleware.GuardrailCheck(guardrailPipeline))
+		}
+
 		chat = handler.NewChatHandler(fr, logger).WithChains(chains)
+		if advancedRouter != nil {
+			chat = chat.WithAdvancedRouter(advancedRouter)
+		}
 		r.Post("/chat/completions", chat.Handle)
 
 		comp := handler.NewCompletionsHandler(registry, logger)

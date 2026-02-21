@@ -62,6 +62,9 @@ type RequestLogContext struct {
 
 	// Set by budget middleware after handler returns
 	CostUSD float64
+
+	// Set by cache middleware (hit|semantic_hit|miss)
+	CacheResult string
 }
 
 // NewRequestLogContext injects a fresh RequestLogContext into ctx and returns both.
@@ -132,5 +135,12 @@ func SetStreaming(ctx context.Context) {
 func RecordTTFT(ctx context.Context) {
 	if lc := GetRequestLogContext(ctx); lc != nil && lc.TTFTAt.IsZero() {
 		lc.TTFTAt = time.Now()
+	}
+}
+
+// SetCacheResult records the cache lookup result ("hit", "semantic_hit", "miss").
+func SetCacheResult(ctx context.Context, result string) {
+	if lc := GetRequestLogContext(ctx); lc != nil {
+		lc.CacheResult = result
 	}
 }

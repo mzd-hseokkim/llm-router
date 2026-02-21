@@ -8,6 +8,7 @@ import (
 
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/llm-router/gateway/internal/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // RequestRecorder receives a request result for provider health tracking.
@@ -23,6 +24,15 @@ func RequestLogger(w *telemetry.LogWriter, logger *slog.Logger, recorder Request
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 			start := time.Now()
+
+			// Extract W3C trace context from inbound headers and start a root span.
+			traceCtx := telemetry.ExtractTraceContext(r)
+			traceCtx, span := telemetry.StartSpan(traceCtx, "gateway.request",
+				attribute.String("http.method", r.Method),
+				attribute.String("http.path", r.URL.Path),
+			)
+			defer span.End()
+			r = r.WithContext(traceCtx)
 
 			ctx, lc := telemetry.NewRequestLogContext(r.Context())
 			r = r.WithContext(ctx)
@@ -64,13 +74,21 @@ func RequestLogger(w *telemetry.LogWriter, logger *slog.Logger, recorder Request
 				entry.TTFTMs = &ttft
 			}
 
+			cacheResult := lc.CacheResult
+			if cacheResult == "" {
+				cacheResult = "miss"
+			}
+
+			traceID := telemetry.TraceIDFromContext(r.Context())
 			logger.Info("request_completed",
 				"request_id", entry.RequestID,
+				"trace_id", traceID,
 				"model", entry.Model,
 				"provider", entry.Provider,
 				"latency_ms", entry.LatencyMs,
 				"tokens", entry.TotalTokens,
 				"status", entry.StatusCode,
+				"cache", cacheResult,
 			)
 
 			w.Write(entry)
@@ -78,9 +96,35 @@ func RequestLogger(w *telemetry.LogWriter, logger *slog.Logger, recorder Request
 			// Update Prometheus metrics.
 			if lc.Provider != "" {
 				statusLabel := fmt.Sprintf("%d", statusCode)
-				telemetry.RequestsTotal.WithLabelValues(lc.Provider, lc.Model, statusLabel).Inc()
+				telemetry.RequestsTotal.WithLabelValues(lc.Provider, lc.Model, statusLabel, cacheResult).Inc()
 				telemetry.RequestDurationSeconds.WithLabelValues(lc.Provider, lc.Model).
 					Observe(float64(latencyMs) / 1000.0)
+
+				if lc.PromptTokens > 0 {
+					telemetry.TokensTotal.WithLabelValues(lc.Provider, lc.Model, "input").Add(float64(lc.PromptTokens))
+				}
+				if lc.CompletionTokens > 0 {
+					telemetry.TokensTotal.WithLabelValues(lc.Provider, lc.Model, "output").Add(float64(lc.CompletionTokens))
+				}
+				if lc.CostUSD > 0 {
+					teamID := ""
+					if lc.TeamID != nil {
+						teamID = lc.TeamID.String()
+					}
+					telemetry.CostUSDTotal.WithLabelValues(lc.Provider, lc.Model, teamID).Add(lc.CostUSD)
+				}
+
+				provStatus := "success"
+				if statusCode >= 500 {
+					provStatus = "error"
+				}
+				telemetry.ProviderRequestsTotal.WithLabelValues(lc.Provider, provStatus).Inc()
+				telemetry.ProviderLatencySeconds.WithLabelValues(lc.Provider).Observe(float64(latencyMs) / 1000.0)
+
+				if entry.TTFTMs != nil {
+					telemetry.StreamingTTFTSeconds.WithLabelValues(lc.Provider, lc.Model).
+						Observe(float64(*entry.TTFTMs) / 1000.0)
+				}
 			}
 
 			// Update provider health tracker.

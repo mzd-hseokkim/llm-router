@@ -7,20 +7,35 @@ import (
 	"os"
 	"time"
 
+	"github.com/llm-router/gateway/internal/gateway/types"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 
+	"github.com/llm-router/gateway/internal/alerting"
+	"github.com/llm-router/gateway/internal/audit"
 	"github.com/llm-router/gateway/internal/auth"
+	"github.com/llm-router/gateway/internal/auth/oauth"
+	"github.com/llm-router/gateway/internal/auth/rbac"
+	"github.com/llm-router/gateway/internal/auth/session"
 	"github.com/llm-router/gateway/internal/budget"
+	exactcache "github.com/llm-router/gateway/internal/cache/exact"
+	semanticcache "github.com/llm-router/gateway/internal/cache/semantic"
 	"github.com/llm-router/gateway/internal/config"
 	"github.com/llm-router/gateway/internal/cost"
 	"github.com/llm-router/gateway/internal/crypto"
 	"github.com/llm-router/gateway/internal/gateway/circuitbreaker"
 	"github.com/llm-router/gateway/internal/gateway/fallback"
 	"github.com/llm-router/gateway/internal/gateway/handler"
+	"github.com/llm-router/gateway/internal/gateway/middleware"
 	"github.com/llm-router/gateway/internal/gateway/router"
+	"github.com/llm-router/gateway/internal/guardrail"
+	"github.com/llm-router/gateway/internal/guardrail/content"
+	"github.com/llm-router/gateway/internal/guardrail/injection"
+	"github.com/llm-router/gateway/internal/guardrail/keyword"
+	"github.com/llm-router/gateway/internal/guardrail/pii"
 	"github.com/llm-router/gateway/internal/health"
 	internalhandler "github.com/llm-router/gateway/internal/handler"
 	"github.com/llm-router/gateway/internal/provider"
@@ -51,6 +66,10 @@ func main() {
 	applyEnvKeys(cfg)
 
 	logger := setupLogger(cfg.Log)
+
+	// --- OpenTelemetry ---
+	otelShutdown := telemetry.InitOTel(context.Background(), "llm-router-gateway", version, logger)
+	defer func() { _ = otelShutdown(context.Background()) }()
 
 	// --- Database ---
 	pool, err := pgstore.NewPool(context.Background(), cfg.Database.URL, int32(cfg.Database.MaxConnections))
@@ -119,6 +138,11 @@ func main() {
 	budgetScheduler.Start()
 	defer budgetScheduler.Stop()
 
+	// --- Audit logger ---
+	auditStore := pgstore.NewAuditStore(pool)
+	auditLogger := audit.New(auditStore, logger)
+	defer auditLogger.Close()
+
 	// --- Provider health tracker ---
 	tracker := health.NewProviderTracker()
 
@@ -133,9 +157,43 @@ func main() {
 	srv := server.New(cfg.Server, logger)
 	r := srv.Router()
 
+	// --- Guardrails ---
+	guardrailPipeline := buildGuardrailPipeline(cfg, logger)
+
+	// --- Exact-match cache ---
+	var cacheMw *middleware.CacheMiddleware
+	var ec *exactcache.Cache
+	if cfg.Cache.ExactMatch.Enabled {
+		ec = exactcache.New(redisClient, cfg.Cache.ExactMatch.DefaultTTL, cfg.Cache.ExactMatch.MaxResponseSize)
+		cacheMw = middleware.NewCacheMiddleware(ec, cfg.Cache.ExactMatch.CacheTemperatureZeroOnly)
+
+		// --- Semantic cache (depends on exact cache + pgvector) ---
+		if cfg.Cache.Semantic.Enabled {
+			apiKey := cfg.Cache.Semantic.EmbeddingAPIKey
+			if apiKey == "" {
+				apiKey = cfg.Providers.OpenAI.APIKey
+			}
+			embedder := semanticcache.NewOpenAIEmbedder(apiKey, cfg.Cache.Semantic.EmbeddingModel, cfg.Providers.OpenAI.BaseURL)
+			vectorStore := pgstore.NewVectorStore(pool)
+			semCache := semanticcache.New(vectorStore, embedder, cfg.Cache.Semantic.Threshold, cfg.Cache.Semantic.TTL, logger)
+			cacheMw.WithSemantic(func(ctx context.Context, req *types.ChatCompletionRequest) (*types.ChatCompletionResponse, float64, error) {
+				return semCache.Lookup(ctx, req)
+			})
+			logger.Info("semantic cache enabled", "threshold", cfg.Cache.Semantic.Threshold)
+		}
+		logger.Info("exact-match cache enabled", "ttl", cfg.Cache.ExactMatch.DefaultTTL)
+	}
+
+	// --- Alerting ---
+	alertRouter := buildAlertRouter(cfg, redisClient, pool, logger)
+
+	// --- Advanced routing engine ---
+	ruleStore := pgstore.NewRoutingRuleStore(pool)
+	advRouter := buildAdvancedRouter(ruleStore, costCalc, logger)
+
 	// /v1 routes — protected by virtual key auth
 	chatHandler := router.Setup(r, registry, fr, buildFallbackChains(cfg.Routing), logger,
-		authMw.Middleware, logWriter, tracker, rateLimiter, budgetMgr, costCalc)
+		authMw.Middleware, logWriter, tracker, rateLimiter, budgetMgr, costCalc, cacheMw, guardrailPipeline, advRouter)
 
 	// Subscribe chat handler to routing config changes so that PUT /admin/routing
 	// immediately updates the active fallback chains.
@@ -157,8 +215,28 @@ func main() {
 	r.Handle("/metrics", promhttp.Handler())
 
 	// /admin/* — protected by master key
+	orgStore := pgstore.NewOrgStore(pool)
+	roleStore := pgstore.NewRoleStore(pool)
 	registerAdminRoutes(r, keyStore, keyCache, km, cipher, pool, logStore, cb, cfg, logger,
-		rateLimiter, budgetMgr, budgetStore, routingStore)
+		rateLimiter, budgetMgr, budgetStore, routingStore, orgStore, roleStore, ec, ruleStore, advRouter,
+		auditLogger, auditStore, alertRouter)
+
+	// /auth/* — OAuth / SSO endpoints
+	oauthProviders := buildOAuthProviders(cfg)
+	if len(oauthProviders) > 0 {
+		sessionStore := session.NewStore(redisClient, cfg.Auth.SessionTTL)
+		authorizer := rbac.NewAuthorizer(roleStore, redisClient)
+		authHandler := handler.NewAuthHandler(oauthProviders, sessionStore, orgStore, roleStore, authorizer, logger)
+		r.Get("/auth/providers", authHandler.Providers)
+		r.Get("/auth/login", authHandler.Login)
+		r.Get("/auth/callback", authHandler.Callback)
+		r.Post("/auth/logout", authHandler.Logout)
+		r.Group(func(sub chi.Router) {
+			sub.Use(authHandler.SessionMiddleware)
+			sub.Get("/auth/me", authHandler.Me)
+		})
+		logger.Info("oauth/sso enabled", "providers", len(oauthProviders))
+	}
 
 	if err := srv.ListenAndServe(context.Background()); err != nil {
 		logger.Error("server exited with error", "error", err)
@@ -283,11 +361,22 @@ func registerAdminRoutes(
 	budgetMgr *budget.Manager,
 	budgetStore *pgstore.BudgetStore,
 	routingStore *handler.RoutingStore,
+	orgStore *pgstore.OrgStore,
+	roleStore *pgstore.RoleStore,
+	exactCache *exactcache.Cache,
+	ruleStore *pgstore.RoutingRuleStore,
+	advRouter *router.AdvancedRouter,
+	auditLogger *audit.Logger,
+	auditStore *pgstore.AuditStore,
+	alertRouter *alerting.Router,
 ) {
 	adminMw := auth.AdminAuth(cfg.Gateway.MasterKey)
 
 	r.Group(func(r chi.Router) {
 		r.Use(adminMw)
+		if auditLogger != nil {
+			r.Use(audit.Middleware(auditLogger))
+		}
 
 		// Virtual key CRUD
 		vkHandler := handler.NewAdminKeysHandler(store, cache, logger)
@@ -338,7 +427,6 @@ func registerAdminRoutes(
 		r.Get("/admin/usage/top-spenders", usageHandler.TopSpenders)
 
 		// Organizations, Teams, Users
-		orgStore := pgstore.NewOrgStore(pool)
 		orgsHandler := handler.NewAdminOrgsHandler(orgStore)
 		r.Post("/admin/organizations", orgsHandler.CreateOrg)
 		r.Get("/admin/organizations", orgsHandler.ListOrgs)
@@ -353,16 +441,84 @@ func registerAdminRoutes(
 		r.Get("/admin/users/{id}", orgsHandler.GetUser)
 		r.Put("/admin/users/{id}", orgsHandler.UpdateUser)
 
+		// Role management (RBAC)
+		rolesHandler := handler.NewAdminRolesHandler(roleStore, rbac.NewAuthorizer(roleStore, nil))
+		r.Get("/admin/roles", rolesHandler.ListRoles)
+		r.Post("/admin/users/{user_id}/roles", rolesHandler.AssignRole)
+
 		// Routing config (hot reload) — routingStore is shared with main() subscribers
 		routingHandler := handler.NewAdminRoutingHandler(routingStore)
 		r.Get("/admin/routing", routingHandler.Get)
 		r.Put("/admin/routing", routingHandler.Update)
 		r.Post("/admin/routing/reload", routingHandler.Reload)
 
+		// Advanced routing rules CRUD
+		if ruleStore != nil {
+			rrHandler := handler.NewAdminRoutingRulesHandler(ruleStore, advRouter)
+			r.Get("/admin/routing/rules", rrHandler.List)
+			r.Post("/admin/routing/rules", rrHandler.Create)
+			r.Put("/admin/routing/rules/{id}", rrHandler.UpdateRule)
+			r.Delete("/admin/routing/rules/{id}", rrHandler.DeleteRule)
+			r.Post("/admin/routing/rules/reload", rrHandler.ReloadRules)
+			r.Post("/admin/routing/test", rrHandler.DryRun)
+		}
+
+		// Cache admin endpoints
+		if exactCache != nil {
+			cacheHandler := handler.NewAdminCacheHandler(exactCache)
+			r.Delete("/admin/cache/exact", cacheHandler.Delete)
+			r.Get("/admin/cache/exact/{hash}", cacheHandler.Get)
+		}
+
+		// Audit log endpoints
+		if auditStore != nil {
+			auditHandler := handler.NewAdminAuditHandler(auditStore)
+			r.Get("/admin/audit-logs", auditHandler.List)
+			r.Get("/admin/audit-logs/security-events", auditHandler.SecurityEvents)
+		}
+
+		// Alerting endpoints
+		if alertRouter != nil {
+			alertsHandler := handler.NewAdminAlertsHandler(alertRouter, pool)
+			r.Post("/admin/alerts/test", alertsHandler.Test)
+			r.Get("/admin/alerts/history", alertsHandler.History)
+		}
+
 		// OpenAPI spec
 		openAPIHandler := handler.NewAdminOpenAPIHandler()
 		r.Get("/admin/openapi.json", openAPIHandler.Spec)
 	})
+}
+
+// buildOAuthProviders creates OAuth provider instances from config.
+func buildOAuthProviders(cfg *config.Config) []oauth.Provider {
+	var providers []oauth.Provider
+	for _, pc := range cfg.Auth.Providers {
+		if !pc.IsEnabled() {
+			continue
+		}
+		provCfg := oauth.Config{
+			ClientID:         pc.ClientID,
+			ClientSecret:     pc.ClientSecret,
+			GroupRoleMapping: pc.GroupRoleMapping,
+		}
+		switch pc.Name {
+		case "google":
+			providers = append(providers, oauth.NewGoogle(provCfg))
+		case "github":
+			providers = append(providers, oauth.NewGitHub(provCfg))
+		default:
+			// OIDC providers require network discovery — skip if issuer URL missing
+			if pc.IssuerURL == "" {
+				continue
+			}
+			p, err := oauth.NewOIDC(context.Background(), pc.Name, provCfg, pc.IssuerURL)
+			if err == nil {
+				providers = append(providers, p)
+			}
+		}
+	}
+	return providers
 }
 
 // applyEnvKeys overrides provider API keys and gateway config from env vars.
@@ -400,6 +556,99 @@ func applyEnvKeys(cfg *config.Config) {
 	if v := os.Getenv("ENCRYPTION_KEY"); v != "" {
 		cfg.Gateway.EncryptionKey = v
 	}
+}
+
+// buildGuardrailPipeline constructs the guardrail pipeline from config.
+// Returns nil if no guardrails are enabled.
+func buildGuardrailPipeline(cfg *config.Config, logger *slog.Logger) *guardrail.Pipeline {
+	gc := cfg.Guardrails
+
+	var inputGuards, outputGuards []guardrail.Guardrail
+
+	// PII: applied to both input and output
+	if gc.PII.Enabled {
+		action := guardrail.Action(gc.PII.Action)
+		d := pii.NewDetector(true, action, gc.PII.Categories)
+		inputGuards = append(inputGuards, d)
+		outputGuards = append(outputGuards, d)
+	}
+
+	// Prompt injection: input only
+	if gc.PromptInjection.Enabled {
+		d := injection.NewDetector(true, guardrail.Action(gc.PromptInjection.Action))
+		inputGuards = append(inputGuards, d)
+	}
+
+	// Content filter: both directions
+	if gc.ContentFilter.Enabled {
+		f := content.NewFilter(true, guardrail.Action(gc.ContentFilter.Action), gc.ContentFilter.Categories)
+		inputGuards = append(inputGuards, f)
+		outputGuards = append(outputGuards, f)
+	}
+
+	// Custom keywords: both directions
+	if gc.CustomKeywords.Enabled && len(gc.CustomKeywords.Blocked) > 0 {
+		f := keyword.NewFilter(true, guardrail.Action(gc.CustomKeywords.Action), gc.CustomKeywords.Blocked)
+		inputGuards = append(inputGuards, f)
+		outputGuards = append(outputGuards, f)
+	}
+
+	if len(inputGuards) == 0 && len(outputGuards) == 0 {
+		return nil
+	}
+
+	logger.Info("guardrails enabled",
+		"input_count", len(inputGuards),
+		"output_count", len(outputGuards))
+	return guardrail.NewPipeline(inputGuards, outputGuards, logger)
+}
+
+// buildAlertRouter creates the alerting Router from config.
+// Returns nil if no channels are configured (graceful degradation).
+func buildAlertRouter(cfg *config.Config, redisClient *redis.Client, pool *pgxpool.Pool, logger *slog.Logger) *alerting.Router {
+	if len(cfg.Alerting.Channels) == 0 {
+		return nil
+	}
+
+	notifiers := make(map[string]alerting.Notifier, len(cfg.Alerting.Channels))
+	for _, ch := range cfg.Alerting.Channels {
+		switch ch.Type {
+		case "slack":
+			notifiers[ch.Name] = alerting.NewSlackNotifier(ch.Name, ch.WebhookURL)
+		case "webhook":
+			url := ch.URL
+			if url == "" {
+				url = ch.WebhookURL
+			}
+			notifiers[ch.Name] = alerting.NewWebhookNotifier(ch.Name, url, ch.Method, ch.Headers, ch.Retry)
+		case "email":
+			notifiers[ch.Name] = alerting.NewEmailNotifier(ch.Name, ch.SMTPHost, ch.SMTPPort, ch.From, ch.To)
+		default:
+			logger.Warn("alerting: unknown channel type", "name", ch.Name, "type", ch.Type)
+		}
+	}
+
+	dedup := alerting.NewDeduplicator(redisClient, 15*time.Minute)
+	ar := alerting.NewRouter(cfg.Alerting, notifiers, dedup, pool, logger)
+	logger.Info("alerting enabled", "channels", len(notifiers))
+	return ar
+}
+
+// buildAdvancedRouter loads routing rules from DB and creates the engine.
+// Returns nil if the table is not available or the load fails (graceful degradation).
+func buildAdvancedRouter(store *pgstore.RoutingRuleStore, pricing *cost.Calculator, logger *slog.Logger) *router.AdvancedRouter {
+	rules, err := store.List(context.Background())
+	if err != nil {
+		logger.Warn("failed to load routing rules; advanced routing disabled", "error", err)
+		return nil
+	}
+	ar, err := router.NewAdvancedRouter(rules, pricing)
+	if err != nil {
+		logger.Warn("failed to build advanced router", "error", err)
+		return nil
+	}
+	logger.Info("advanced routing engine loaded", "rules", len(rules))
+	return ar
 }
 
 func setupLogger(cfg config.LogConfig) *slog.Logger {

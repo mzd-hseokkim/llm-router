@@ -17,18 +17,20 @@ type StreamOptions struct {
 // Known fields are parsed into struct fields; unknown/future fields are preserved
 // via the raw body at the handler level for provider pass-through.
 type ChatCompletionRequest struct {
-	Model            string          `json:"model"`
-	Messages         []Message       `json:"messages"`
-	Temperature      *float64        `json:"temperature,omitempty"`
-	MaxTokens        *int            `json:"max_tokens,omitempty"`
-	TopP             *float64        `json:"top_p,omitempty"`
-	N                *int            `json:"n,omitempty"`
-	Stream           bool            `json:"stream,omitempty"`
-	StreamOptions    *StreamOptions  `json:"stream_options,omitempty"`
-	Stop             json.RawMessage `json:"stop,omitempty"` // string or []string
-	PresencePenalty  *float64        `json:"presence_penalty,omitempty"`
-	FrequencyPenalty *float64        `json:"frequency_penalty,omitempty"`
-	User             string          `json:"user,omitempty"`
+	Model            string            `json:"model"`
+	Messages         []Message         `json:"messages"`
+	Temperature      *float64          `json:"temperature,omitempty"`
+	MaxTokens        *int              `json:"max_tokens,omitempty"`
+	TopP             *float64          `json:"top_p,omitempty"`
+	N                *int              `json:"n,omitempty"`
+	Stream           bool              `json:"stream,omitempty"`
+	StreamOptions    *StreamOptions    `json:"stream_options,omitempty"`
+	Stop             json.RawMessage   `json:"stop,omitempty"` // string or []string
+	PresencePenalty  *float64          `json:"presence_penalty,omitempty"`
+	FrequencyPenalty *float64          `json:"frequency_penalty,omitempty"`
+	User             string            `json:"user,omitempty"`
+	Tools            []json.RawMessage `json:"tools,omitempty"`            // tool definitions
+	Metadata         map[string]string `json:"metadata,omitempty"`         // gateway routing metadata
 }
 
 // ChatCompletionResponse is the OpenAI-compatible chat completions response.

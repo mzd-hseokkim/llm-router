@@ -12,13 +12,40 @@ import (
 )
 
 type Config struct {
-	Server    ServerConfig    `koanf:"server"`
-	Database  DatabaseConfig  `koanf:"database"`
-	Redis     RedisConfig     `koanf:"redis"`
-	Log       LogConfig       `koanf:"log"`
-	Providers ProvidersConfig `koanf:"providers"`
-	Gateway   GatewayConfig   `koanf:"gateway"`
-	Routing   RoutingConfig   `koanf:"routing"`
+	Server     ServerConfig     `koanf:"server"`
+	Database   DatabaseConfig   `koanf:"database"`
+	Redis      RedisConfig      `koanf:"redis"`
+	Log        LogConfig        `koanf:"log"`
+	Providers  ProvidersConfig  `koanf:"providers"`
+	Gateway    GatewayConfig    `koanf:"gateway"`
+	Routing    RoutingConfig    `koanf:"routing"`
+	Auth       AuthConfig       `koanf:"auth"`
+	Guardrails GuardrailConfig  `koanf:"guardrails"`
+	Cache      CacheConfig      `koanf:"cache"`
+	Alerting   AlertingConfig   `koanf:"alerting"`
+}
+
+// AuthConfig holds OAuth / SSO provider configuration.
+type AuthConfig struct {
+	SessionTTL time.Duration       `koanf:"session_ttl"`
+	Providers  []OAuthProviderConfig `koanf:"providers"`
+}
+
+// OAuthProviderConfig configures a single OAuth / OIDC provider.
+type OAuthProviderConfig struct {
+	Name         string            `koanf:"name"`           // "google", "github", "okta"
+	Type         string            `koanf:"type"`           // "oauth2" | "oidc"
+	ClientID     string            `koanf:"client_id"`
+	ClientSecret string            `koanf:"client_secret"`
+	IssuerURL    string            `koanf:"issuer_url"`     // OIDC only
+	Scopes       []string          `koanf:"scopes"`
+	// GroupRoleMapping maps IdP group names to Gateway roles (OIDC only).
+	GroupRoleMapping map[string]string `koanf:"group_role_mapping"`
+}
+
+// IsEnabled returns true if the provider has the minimum required credentials set.
+func (p OAuthProviderConfig) IsEnabled() bool {
+	return p.ClientID != "" && p.ClientSecret != ""
 }
 
 type GatewayConfig struct {
@@ -140,6 +167,90 @@ func Load(configPath string) (*Config, error) {
 	return cfg, nil
 }
 
+// GuardrailConfig holds guardrail policy configuration.
+type GuardrailConfig struct {
+	PII              PIIGuardrailConfig              `koanf:"pii"`
+	PromptInjection  PromptInjectionGuardrailConfig  `koanf:"prompt_injection"`
+	ContentFilter    ContentFilterGuardrailConfig    `koanf:"content_filter"`
+	CustomKeywords   CustomKeywordsGuardrailConfig   `koanf:"custom_keywords"`
+}
+
+type PIIGuardrailConfig struct {
+	Enabled    bool     `koanf:"enabled"`
+	Action     string   `koanf:"action"`     // block | mask | log_only
+	Categories []string `koanf:"categories"` // credit_card, ssn, email, phone_us, ip_address, korean_rrn
+}
+
+type PromptInjectionGuardrailConfig struct {
+	Enabled bool   `koanf:"enabled"`
+	Action  string `koanf:"action"` // block
+}
+
+type ContentFilterGuardrailConfig struct {
+	Enabled    bool     `koanf:"enabled"`
+	Action     string   `koanf:"action"`
+	Categories []string `koanf:"categories"` // hate, violence, sexual
+}
+
+type CustomKeywordsGuardrailConfig struct {
+	Enabled  bool     `koanf:"enabled"`
+	Action   string   `koanf:"action"`
+	Blocked  []string `koanf:"blocked"`
+}
+
+// CacheConfig holds exact-match and semantic cache configuration.
+type CacheConfig struct {
+	ExactMatch ExactCacheConfig    `koanf:"exact_match"`
+	Semantic   SemanticCacheConfig `koanf:"semantic"`
+}
+
+type ExactCacheConfig struct {
+	Enabled                  bool          `koanf:"enabled"`
+	DefaultTTL               time.Duration `koanf:"default_ttl"`
+	MaxTTL                   time.Duration `koanf:"max_ttl"`
+	MaxResponseSize          int64         `koanf:"max_response_size"`
+	CacheTemperatureZeroOnly bool          `koanf:"cache_temperature_zero_only"`
+}
+
+type SemanticCacheConfig struct {
+	Enabled         bool          `koanf:"enabled"`
+	Threshold       float64       `koanf:"threshold"`
+	EmbeddingModel  string        `koanf:"embedding_model"`
+	MaxCacheEntries int           `koanf:"max_cache_entries"`
+	TTL             time.Duration `koanf:"ttl"`
+	// EmbeddingAPIKey for the embedding provider (defaults to providers.openai.api_key)
+	EmbeddingAPIKey string `koanf:"embedding_api_key"`
+}
+
+// AlertingConfig holds alerting channel and routing configuration.
+type AlertingConfig struct {
+	Channels []AlertChannelConfig  `koanf:"channels"`
+	Routing  []AlertRoutingConfig  `koanf:"routing"`
+}
+
+// AlertChannelConfig defines one notification channel.
+type AlertChannelConfig struct {
+	Name       string            `koanf:"name"`
+	Type       string            `koanf:"type"`         // slack | email | webhook
+	WebhookURL string            `koanf:"webhook_url"`  // Slack or generic webhook
+	URL        string            `koanf:"url"`          // generic webhook
+	Method     string            `koanf:"method"`       // POST
+	Headers    map[string]string `koanf:"headers"`
+	Retry      int               `koanf:"retry"`
+	// Email-specific
+	SMTPHost string   `koanf:"smtp_host"`
+	SMTPPort int      `koanf:"smtp_port"`
+	From     string   `koanf:"from"`
+	To       []string `koanf:"to"`
+}
+
+// AlertRoutingConfig maps event types and severity to channels.
+type AlertRoutingConfig struct {
+	Events   []string `koanf:"events"`
+	Severity string   `koanf:"severity"`
+	Channels []string `koanf:"channels"`
+}
+
 func applyDefaults(cfg *Config) {
 	if cfg.Server.Port == 0 {
 		cfg.Server.Port = 8080
@@ -176,5 +287,41 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Providers.Bedrock.Region == "" {
 		cfg.Providers.Bedrock.Region = "us-east-1"
+	}
+	if cfg.Auth.SessionTTL == 0 {
+		cfg.Auth.SessionTTL = 24 * time.Hour
+	}
+	if cfg.Guardrails.PII.Action == "" {
+		cfg.Guardrails.PII.Action = "mask"
+	}
+	if cfg.Guardrails.PromptInjection.Action == "" {
+		cfg.Guardrails.PromptInjection.Action = "block"
+	}
+	if cfg.Guardrails.ContentFilter.Action == "" {
+		cfg.Guardrails.ContentFilter.Action = "block"
+	}
+	if cfg.Guardrails.CustomKeywords.Action == "" {
+		cfg.Guardrails.CustomKeywords.Action = "block"
+	}
+	if cfg.Cache.ExactMatch.DefaultTTL == 0 {
+		cfg.Cache.ExactMatch.DefaultTTL = 24 * time.Hour
+	}
+	if cfg.Cache.ExactMatch.MaxTTL == 0 {
+		cfg.Cache.ExactMatch.MaxTTL = 7 * 24 * time.Hour
+	}
+	if cfg.Cache.ExactMatch.MaxResponseSize == 0 {
+		cfg.Cache.ExactMatch.MaxResponseSize = 1 << 20 // 1MB
+	}
+	if cfg.Cache.Semantic.Threshold == 0 {
+		cfg.Cache.Semantic.Threshold = 0.95
+	}
+	if cfg.Cache.Semantic.EmbeddingModel == "" {
+		cfg.Cache.Semantic.EmbeddingModel = "text-embedding-3-small"
+	}
+	if cfg.Cache.Semantic.MaxCacheEntries == 0 {
+		cfg.Cache.Semantic.MaxCacheEntries = 100000
+	}
+	if cfg.Cache.Semantic.TTL == 0 {
+		cfg.Cache.Semantic.TTL = 24 * time.Hour
 	}
 }

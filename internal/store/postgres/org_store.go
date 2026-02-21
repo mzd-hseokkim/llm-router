@@ -276,6 +276,74 @@ func (s *OrgStore) ListUsers(ctx context.Context, orgID *uuid.UUID) ([]*User, er
 	return users, rows.Err()
 }
 
+// --- Team Members (many-to-many) ---
+
+// AddTeamMember adds a user to a team with the given role.
+func (s *OrgStore) AddTeamMember(ctx context.Context, teamID, userID uuid.UUID, role string) error {
+	const q = `
+		INSERT INTO team_members (team_id, user_id, role)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (team_id, user_id) DO UPDATE SET role = EXCLUDED.role`
+	_, err := s.pool.Exec(ctx, q, teamID, userID, role)
+	if err != nil {
+		return fmt.Errorf("add team member: %w", err)
+	}
+	return nil
+}
+
+// RemoveTeamMember removes a user from a team.
+func (s *OrgStore) RemoveTeamMember(ctx context.Context, teamID, userID uuid.UUID) error {
+	const q = `DELETE FROM team_members WHERE team_id = $1 AND user_id = $2`
+	_, err := s.pool.Exec(ctx, q, teamID, userID)
+	return err
+}
+
+// GetUserPrimaryOrg returns the first org_id associated with a user.
+func (s *OrgStore) GetUserPrimaryOrg(ctx context.Context, userID uuid.UUID) (*uuid.UUID, *uuid.UUID, error) {
+	const q = `SELECT org_id, team_id FROM users WHERE id = $1`
+	var orgID, teamID pgtype.UUID
+	err := s.pool.QueryRow(ctx, q, userID).Scan(&orgID, &teamID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("get user primary org: %w", err)
+	}
+	var orgUUID, teamUUID *uuid.UUID
+	if orgID.Valid {
+		uid := uuid.UUID(orgID.Bytes)
+		orgUUID = &uid
+	}
+	if teamID.Valid {
+		tid := uuid.UUID(teamID.Bytes)
+		teamUUID = &tid
+	}
+	return orgUUID, teamUUID, nil
+}
+
+// GetUserByEmail retrieves a user by their email address.
+func (s *OrgStore) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+	const q = `SELECT id, org_id, team_id, email, created_at, updated_at FROM users WHERE email = $1`
+	user := &User{}
+	var orgID, teamID pgtype.UUID
+	err := s.pool.QueryRow(ctx, q, email).Scan(&user.ID, &orgID, &teamID, &user.Email, &user.CreatedAt, &user.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get user by email: %w", err)
+	}
+	if orgID.Valid {
+		uid := uuid.UUID(orgID.Bytes)
+		user.OrgID = &uid
+	}
+	if teamID.Valid {
+		tid := uuid.UUID(teamID.Bytes)
+		user.TeamID = &tid
+	}
+	return user, nil
+}
+
 // UpdateUser updates email (and optionally team) for a user.
 func (s *OrgStore) UpdateUser(ctx context.Context, id uuid.UUID, email string, teamID *uuid.UUID) (*User, error) {
 	const q = `UPDATE users SET email = $1, team_id = $2, updated_at = NOW() WHERE id = $3

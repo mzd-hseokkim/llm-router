@@ -1,0 +1,136 @@
+package middleware
+
+import (
+	"bytes"
+	"encoding/json"
+	"io"
+	"net/http"
+	"strings"
+
+	"github.com/llm-router/gateway/internal/gateway/types"
+	"github.com/llm-router/gateway/internal/guardrail"
+)
+
+// GuardrailCheck returns a middleware that runs input and output guardrails
+// on chat completion requests. Input guardrails inspect user messages before
+// the request is forwarded to the provider. Output guardrails inspect the
+// response for non-streaming requests.
+func GuardrailCheck(pipeline *guardrail.Pipeline) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Only apply to chat completions path
+			if !strings.HasSuffix(r.URL.Path, "/chat/completions") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			body, err := io.ReadAll(io.LimitReader(r.Body, 10<<20))
+			if err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			// Restore body for the next handler
+			r.Body = io.NopCloser(bytes.NewReader(body))
+
+			var req types.ChatCompletionRequest
+			if err := json.Unmarshal(body, &req); err != nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			// Collect all user message content for input guardrail check
+			var userText strings.Builder
+			for i, m := range req.Messages {
+				if m.Role == "user" {
+					if i > 0 {
+						userText.WriteByte('\n')
+					}
+					userText.WriteString(m.Content)
+				}
+			}
+
+			if userText.Len() > 0 {
+				modified, blockErr, err := pipeline.CheckInput(r.Context(), userText.String())
+				if err == nil && blockErr != nil {
+					writeGuardrailError(w, blockErr)
+					return
+				}
+				// If text was masked, rebuild messages with masked content
+				if err == nil && modified != userText.String() {
+					req = applyMaskedText(req, modified)
+					newBody, _ := json.Marshal(req)
+					r.Body = io.NopCloser(bytes.NewReader(newBody))
+				}
+			}
+
+			// For non-streaming with output guardrails: wrap ResponseWriter
+			if !req.Stream && pipeline.HasOutput() {
+				rw := &responseCapture{ResponseWriter: w, body: &bytes.Buffer{}}
+				next.ServeHTTP(rw, r)
+				outputText := rw.body.String()
+				if outputText != "" {
+					filtered, blockErr, _ := pipeline.CheckOutput(r.Context(), outputText)
+					if blockErr != nil {
+						// Replace response with guardrail error
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(http.StatusBadRequest)
+						writeGuardrailError(w, blockErr) //nolint:errcheck
+						return
+					}
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(rw.statusCode)
+					w.Write([]byte(filtered)) //nolint:errcheck
+				}
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// applyMaskedText replaces user message content with the masked combined text.
+// Simple approach: distribute masked text back proportionally is complex,
+// so we replace the last user message with the full masked text.
+func applyMaskedText(req types.ChatCompletionRequest, masked string) types.ChatCompletionRequest {
+	// Find the last user message and replace it
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		if req.Messages[i].Role == "user" {
+			req.Messages[i].Content = masked
+			break
+		}
+	}
+	return req
+}
+
+// responseCapture buffers a non-streaming response for output guardrail inspection.
+type responseCapture struct {
+	http.ResponseWriter
+	body       *bytes.Buffer
+	statusCode int
+}
+
+func (rc *responseCapture) WriteHeader(code int) {
+	rc.statusCode = code
+	// Don't write headers yet; we may replace the response
+}
+
+func (rc *responseCapture) Write(b []byte) (int, error) {
+	return rc.body.Write(b)
+}
+
+func writeGuardrailError(w http.ResponseWriter, be *guardrail.BlockError) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+		"error": map[string]any{
+			"message": be.Message,
+			"type":    "content_policy_violation",
+			"code":    be.Guardrail,
+			"param": map[string]string{
+				"guardrail": be.Guardrail,
+				"category":  be.Category,
+			},
+		},
+	})
+}
