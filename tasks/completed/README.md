@@ -178,6 +178,36 @@ tests/e2e/
 
 ---
 
+## 추가 완료 작업
+
+### Guardrails DB 이관 + Admin UI Settings 페이지 ✅ 완료
+
+**목표**: guardrails 설정을 `config.yaml`에서 PostgreSQL DB로 이관, Admin UI에서 런타임 변경 지원
+
+| # | 파일 | 내용 |
+|---|------|------|
+| 1 | `migrations/020_create_guardrail_policies.sql` | guardrail_policies 테이블 (5개 타입, UNIQUE guardrail_type) |
+| 2 | `internal/guardrail/store.go` | PolicyRecord + PolicyStore 인터페이스 |
+| 3 | `internal/store/postgres/guardrail_policy_store.go` | pgx 구현, Upsert ON CONFLICT |
+| 4 | `internal/guardrail/manager.go` | atomic.Pointer[Pipeline] 기반 락-프리 핫리로드 |
+| 5 | `internal/guardrail/builder.go` | ConfigToRecords() — config → DB 시드 변환 |
+| 6 | `internal/gateway/handler/admin_guardrails.go` | Admin CRUD (GET/PUT /admin/guardrails) |
+| 7 | `internal/gateway/middleware/guardrail.go` | *Pipeline → *Manager 교체, nil 파이프라인 패스스루 |
+| 8 | `internal/gateway/middleware/guardrail_test.go` | Manager 래퍼 테스트 + nil pipeline 테스트 추가 |
+| 9 | `internal/gateway/router/router.go` | Setup 파라미터 *Manager로 교체 |
+| 10 | `cmd/gateway/main.go` | initGuardrails(), buildPipelineFromRecords(), 관리 라우트 등록 |
+| 11 | `admin-ui/lib/api.ts` | GuardrailPolicy 타입 + guardrails API 객체 |
+| 12 | `admin-ui/app/(admin)/guardrails/page.tsx` | 5개 섹션 카드 UI (LLM Judge, PII, Injection, Content, Keywords) |
+| 13 | `admin-ui/components/Sidebar.tsx` | nav에 "Guardrails" 추가 |
+
+**핵심 설계**:
+- `atomic.Pointer[Pipeline]` — 락 없는 읽기, goroutine-safe 쓰기 (Go 1.19+)
+- 빈 DB → config 값으로 자동 시드, 이후 DB 값 우선
+- 서버 재시작 없이 Admin API/UI에서 즉시 반영
+- `buildPipelineFromRecords`는 cmd/gateway에 위치 (guardrail 하위 패키지 순환 import 방지)
+
+---
+
 ## 핵심 설계 원칙
 
 **단일 진입점**: 클라이언트는 `base_url` 하나만 기억하면 된다. Provider 세부 사항은 Gateway가 숨긴다.

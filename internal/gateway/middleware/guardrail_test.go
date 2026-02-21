@@ -50,14 +50,24 @@ func (g *blockGuardrail) Check(_ context.Context, text string, dir guardrail.Dir
 	}, nil
 }
 
-func newPipeline(inputs ...guardrail.Guardrail) *guardrail.Pipeline {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	return guardrail.NewPipeline(inputs, nil, logger)
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 }
 
-func newOutputPipeline(outputs ...guardrail.Guardrail) *guardrail.Pipeline {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	return guardrail.NewPipeline(nil, outputs, logger)
+func newManager(inputs ...guardrail.Guardrail) *guardrail.Manager {
+	logger := testLogger()
+	p := guardrail.NewPipeline(inputs, nil, logger)
+	m := guardrail.NewManager(logger)
+	m.SetPipeline(p)
+	return m
+}
+
+func newOutputManager(outputs ...guardrail.Guardrail) *guardrail.Manager {
+	logger := testLogger()
+	p := guardrail.NewPipeline(nil, outputs, logger)
+	m := guardrail.NewManager(logger)
+	m.SetPipeline(p)
+	return m
 }
 
 func chatRequest(messages []types.Message, stream bool) *http.Request {
@@ -91,14 +101,14 @@ func captureHandler(t *testing.T, out *types.ChatCompletionRequest) http.Handler
 // for Fix 2. Before the fix, only the last user message was masked; the first
 // user message's PII leaked through to the provider.
 func TestGuardrailCheck_MultiMessage_AllUserMessagesMasked(t *testing.T) {
-	pipeline := newPipeline(&maskGuardrail{trigger: "SECRET"})
-	mw := middleware.GuardrailCheck(pipeline)
+	mgr := newManager(&maskGuardrail{trigger: "SECRET"})
+	mw := middleware.GuardrailCheck(mgr)
 
 	messages := []types.Message{
-		{Role: "user", Content: "My SECRET is here"},         // first user message
-		{Role: "assistant", Content: "Noted."},               // should be unchanged
-		{Role: "user", Content: "Also SECRET here too"},      // second user message
-		{Role: "user", Content: "No trigger in this one"},    // third user message (no change)
+		{Role: "user", Content: "My SECRET is here"},      // first user message
+		{Role: "assistant", Content: "Noted."},            // should be unchanged
+		{Role: "user", Content: "Also SECRET here too"},   // second user message
+		{Role: "user", Content: "No trigger in this one"}, // third user message (no change)
 	}
 
 	var captured types.ChatCompletionRequest
@@ -130,8 +140,8 @@ func TestGuardrailCheck_MultiMessage_AllUserMessagesMasked(t *testing.T) {
 // TestGuardrailCheck_Block_StopsAtFirstBlockedMessage verifies that a block
 // in one message stops processing and returns 400 (does not pass through).
 func TestGuardrailCheck_Block_StopsAtFirstBlockedMessage(t *testing.T) {
-	pipeline := newPipeline(&blockGuardrail{trigger: "INJECTION"})
-	mw := middleware.GuardrailCheck(pipeline)
+	mgr := newManager(&blockGuardrail{trigger: "INJECTION"})
+	mw := middleware.GuardrailCheck(mgr)
 
 	messages := []types.Message{
 		{Role: "user", Content: "Hello"},
@@ -158,8 +168,8 @@ func TestGuardrailCheck_Block_StopsAtFirstBlockedMessage(t *testing.T) {
 
 // TestGuardrailCheck_NonChatPath skips guardrail for non-chat endpoints.
 func TestGuardrailCheck_NonChatPath(t *testing.T) {
-	pipeline := newPipeline(&blockGuardrail{trigger: "INJECTION"})
-	mw := middleware.GuardrailCheck(pipeline)
+	mgr := newManager(&blockGuardrail{trigger: "INJECTION"})
+	mw := middleware.GuardrailCheck(mgr)
 
 	req := httptest.NewRequest("GET", "/v1/models", nil)
 	innerCalled := false
@@ -176,13 +186,38 @@ func TestGuardrailCheck_NonChatPath(t *testing.T) {
 	}
 }
 
+// TestGuardrailCheck_NilPipeline_PassesThrough verifies that a Manager with
+// no pipeline set passes requests through without guardrail processing.
+func TestGuardrailCheck_NilPipeline_PassesThrough(t *testing.T) {
+	mgr := guardrail.NewManager(testLogger()) // no pipeline set
+	mw := middleware.GuardrailCheck(mgr)
+
+	messages := []types.Message{{Role: "user", Content: "INJECTION attempt"}}
+	innerCalled := false
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		innerCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := chatRequest(messages, false)
+	rw := httptest.NewRecorder()
+	mw(inner).ServeHTTP(rw, req)
+
+	if !innerCalled {
+		t.Error("inner handler should be called when no pipeline is configured")
+	}
+	if rw.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rw.Code)
+	}
+}
+
 // TestResponseCapture_DefaultStatusCode is the regression test for Fix 5.
 // Before the fix, statusCode defaulted to 0; w.WriteHeader(0) on the real
 // ResponseWriter produces an invalid response.
 func TestResponseCapture_DefaultStatusCode(t *testing.T) {
 	// Use an output guardrail pipeline so the responseCapture code path is hit.
-	pipeline := newOutputPipeline(&maskGuardrail{trigger: "CENSORED"})
-	mw := middleware.GuardrailCheck(pipeline)
+	mgr := newOutputManager(&maskGuardrail{trigger: "CENSORED"})
+	mw := middleware.GuardrailCheck(mgr)
 
 	// Inner handler writes a body WITHOUT calling WriteHeader explicitly —
 	// relying on net/http's implicit 200. The responseCapture must treat this

@@ -15,9 +15,19 @@ import (
 // on chat completion requests. Input guardrails inspect user messages before
 // the request is forwarded to the provider. Output guardrails inspect the
 // response for non-streaming requests.
-func GuardrailCheck(pipeline *guardrail.Pipeline) func(http.Handler) http.Handler {
+//
+// The middleware fetches the active pipeline from the Manager on each request,
+// so pipeline hot-reloads via Manager.SetPipeline take effect immediately.
+func GuardrailCheck(manager *guardrail.Manager) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Fetch the current pipeline; skip if none configured.
+			pipeline := manager.Pipeline()
+			if pipeline == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			// Only apply to chat completions path
 			if !strings.HasSuffix(r.URL.Path, "/chat/completions") {
 				next.ServeHTTP(w, r)

@@ -336,3 +336,41 @@ export const teams = {
       `/teams${orgId ? `?org_id=${orgId}` : ""}`
     ).then((r) => r.data),
 };
+
+// --- Guardrails ---
+
+export interface GuardrailPolicy {
+  id: string;
+  guardrail_type: string;
+  is_enabled: boolean;
+  action: string;
+  engine?: string;
+  config_json: Record<string, unknown>;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpdateGuardrailPayload {
+  is_enabled?: boolean;
+  action?: string;
+  engine?: string;
+  config_json?: Record<string, unknown>;
+  sort_order?: number;
+}
+
+export const guardrails = {
+  list: () =>
+    apiFetch<{ data: GuardrailPolicy[] }>("/guardrails").then((r) => r.data),
+  get: (type: string) => apiFetch<GuardrailPolicy>(`/guardrails/${type}`),
+  update: (type: string, payload: UpdateGuardrailPayload) =>
+    apiFetch<GuardrailPolicy>(`/guardrails/${type}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+  updateAll: (policies: Array<{ guardrail_type: string } & UpdateGuardrailPayload>) =>
+    apiFetch<{ data: GuardrailPolicy[] }>("/guardrails", {
+      method: "PUT",
+      body: JSON.stringify({ policies }),
+    }).then((r) => r.data),
+};

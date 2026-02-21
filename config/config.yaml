@@ -49,23 +49,6 @@ gateway:
   master_key: "admin123"
   encryption_key: "FwKMSJ7QxqhEGz2Rp4NlVcDOvbIaHf8Xkn3YeJmTuWs="
 
-guardrails:
-  llm_judge:
-    model: claude-haiku-4-5-20251001
-    # api_key: ""  # 비워두면 providers.anthropic.api_key 사용
-  pii:
-    enabled: true
-    action: mask        # block | mask | log_only
-    # categories 생략 시 전체 활성화 (credit_card, ssn, email, phone_us, ip_address, korean_rrn)
-  prompt_injection:
-    enabled: false
-    action: block
-    engine: llm         # regex | llm
-  content_filter:
-    enabled: false
-    action: block
-    engine: llm         # regex | llm
-  custom_keywords:
-    enabled: false
-    action: block
-    blocked: []
+# Guardrail policies are managed in the database (guardrail_policies table).
+# Configure them at runtime via the Admin UI (/guardrails) or Admin API.
+# LLM-based guardrails use providers.anthropic.api_key above.

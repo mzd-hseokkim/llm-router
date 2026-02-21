@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
@@ -166,7 +167,9 @@ func main() {
 	r := srv.Router()
 
 	// --- Guardrails ---
-	guardrailPipeline := buildGuardrailPipeline(cfg, logger)
+	guardrailPolicyStore := pgstore.NewGuardrailPolicyStore(pool)
+	guardrailMgr := guardrail.NewManager(logger)
+	initGuardrails(context.Background(), guardrailPolicyStore, guardrailMgr, cfg, logger)
 
 	// --- Exact-match cache (temperature=0 only) ---
 	var cacheMw *middleware.CacheMiddleware
@@ -219,7 +222,7 @@ func main() {
 
 	// /v1 routes — protected by virtual key auth
 	chatHandler := router.Setup(r, registry, fr, buildFallbackChains(cfg.Routing), logger,
-		authMw.Middleware, logWriter, tracker, rateLimiter, budgetMgr, costCalc, cacheMw, guardrailPipeline, activeAdvRouter, promptSvc, abTestMw, residencyEnforcer)
+		authMw.Middleware, logWriter, tracker, rateLimiter, budgetMgr, costCalc, cacheMw, guardrailMgr, activeAdvRouter, promptSvc, abTestMw, residencyEnforcer)
 
 	// Subscribe chat handler to routing config changes so that PUT /admin/routing
 	// immediately updates the active fallback chains.
@@ -264,7 +267,8 @@ func main() {
 	registerAdminRoutes(r, keyStore, keyCache, km, cipher, pool, logStore, cb, cfg, logger,
 		rateLimiter, budgetMgr, budgetStore, routingStore, orgStore, roleStore, ec, ruleStore, advRouter,
 		auditLogger, auditStore, alertRouter, promptStore, promptSvc,
-		abTestStore, abTestMw, billingStore, chargebackSvc, residencyEnforcer, buildResidencyRegistry(cfg), fr, costCalc, registry)
+		abTestStore, abTestMw, billingStore, chargebackSvc, residencyEnforcer, buildResidencyRegistry(cfg), fr, costCalc, registry,
+		guardrailPolicyStore, guardrailMgr)
 
 	// /auth/* — OAuth / SSO endpoints
 	oauthProviders := buildOAuthProviders(cfg)
@@ -446,6 +450,8 @@ func registerAdminRoutes(
 	fr *fallback.Router,
 	costCalc *cost.Calculator,
 	registry *provider.Registry,
+	guardrailPolicyStore guardrail.PolicyStore,
+	guardrailMgr *guardrail.Manager,
 ) {
 	adminMw := auth.AdminAuth(cfg.Gateway.MasterKey)
 
@@ -623,6 +629,18 @@ func registerAdminRoutes(
 		r.Put("/admin/providers/{id}/models/{modelId}", providersHandler.UpdateModel)
 		r.Delete("/admin/providers/{id}/models/{modelId}", providersHandler.DeleteModel)
 
+		// Guardrail policy management
+		guardrailsHandler := handler.NewAdminGuardrailsHandler(
+			guardrailPolicyStore, guardrailMgr, logger,
+			func(recs []*guardrail.PolicyRecord) *guardrail.Pipeline {
+				return buildPipelineFromRecords(recs, cfg, logger)
+			},
+		)
+		r.Get("/admin/guardrails", guardrailsHandler.List)
+		r.Get("/admin/guardrails/{type}", guardrailsHandler.Get)
+		r.Put("/admin/guardrails/{type}", guardrailsHandler.Update)
+		r.Put("/admin/guardrails", guardrailsHandler.UpdateAll)
+
 		// Admin playground (master key auth; no virtual key required)
 		playgroundHandler := handler.NewAdminPlaygroundHandler(fr, store, costCalc, logger)
 		r.Post("/admin/playground", playgroundHandler.Chat)
@@ -705,9 +723,141 @@ func applyEnvKeys(cfg *config.Config) {
 	}
 }
 
-// buildGuardrailPipeline constructs the guardrail pipeline from config.
-// Returns nil if no guardrails are enabled.
-func buildGuardrailPipeline(cfg *config.Config, logger *slog.Logger) *guardrail.Pipeline {
+// initGuardrails initialises the GuardrailManager from DB, seeding from config if the
+// table is empty.
+func initGuardrails(
+	ctx context.Context,
+	store guardrail.PolicyStore,
+	mgr *guardrail.Manager,
+	cfg *config.Config,
+	logger *slog.Logger,
+) {
+	recs, err := store.List(ctx)
+	if err != nil {
+		logger.Warn("guardrails: failed to load policies from DB; using config", "error", err)
+		mgr.SetPipeline(buildPipelineFromConfig(cfg, logger))
+		return
+	}
+
+	if len(recs) == 0 {
+		// Seed the DB from config values so the admin UI has records to display.
+		seedRecs := guardrail.ConfigToRecords(cfg.Guardrails)
+		if err := store.UpsertAll(ctx, seedRecs); err != nil {
+			logger.Warn("guardrails: failed to seed DB; using config pipeline", "error", err)
+			mgr.SetPipeline(buildPipelineFromConfig(cfg, logger))
+			return
+		}
+		logger.Info("guardrails: seeded policies from config", "count", len(seedRecs))
+		recs = seedRecs
+	}
+
+	mgr.SetPipeline(buildPipelineFromRecords(recs, cfg, logger))
+}
+
+// buildPipelineFromRecords constructs a Pipeline from PolicyRecord objects.
+// Returns nil if no records are enabled.
+func buildPipelineFromRecords(recs []*guardrail.PolicyRecord, cfg *config.Config, logger *slog.Logger) *guardrail.Pipeline {
+	var inputGuards, outputGuards []guardrail.Guardrail
+
+	// Resolve the Anthropic API key for LLM-based guardrails.
+	anthropicKey := cfg.Providers.Anthropic.APIKey
+
+	// Pre-build LLM judge if any record requests it.
+	var judge *llmjudge.Judge
+	for _, rec := range recs {
+		if !rec.IsEnabled {
+			continue
+		}
+		if rec.Engine == "llm" {
+			if anthropicKey == "" {
+				logger.Warn("llm judge requested but no Anthropic API key configured; falling back to regex")
+			} else {
+				// Read model from llm_judge record if present.
+				model := ""
+				for _, r := range recs {
+					if r.GuardrailType == "llm_judge" {
+						var cfg map[string]any
+						if len(r.ConfigJSON) > 0 {
+							_ = json.Unmarshal(r.ConfigJSON, &cfg)
+							if m, ok := cfg["model"].(string); ok {
+								model = m
+							}
+						}
+						break
+					}
+				}
+				judge = llmjudge.New(anthropicKey, model, logger)
+			}
+			break
+		}
+	}
+
+	for _, rec := range recs {
+		if !rec.IsEnabled {
+			continue
+		}
+		action := guardrail.Action(rec.Action)
+
+		switch rec.GuardrailType {
+		case "pii":
+			var cfg struct {
+				Categories []string `json:"categories"`
+			}
+			_ = json.Unmarshal(rec.ConfigJSON, &cfg)
+			d := pii.NewDetector(true, action, cfg.Categories)
+			inputGuards = append(inputGuards, d)
+			outputGuards = append(outputGuards, d)
+
+		case "prompt_injection":
+			if rec.Engine == "llm" && judge != nil {
+				inputGuards = append(inputGuards, llmjudge.NewPromptInjectionGuard(judge, action))
+			} else {
+				inputGuards = append(inputGuards, injection.NewDetector(true, action))
+			}
+
+		case "content_filter":
+			var cfg struct {
+				Categories []string `json:"categories"`
+			}
+			_ = json.Unmarshal(rec.ConfigJSON, &cfg)
+			if rec.Engine == "llm" && judge != nil {
+				g := llmjudge.NewContentFilterGuard(judge, action)
+				inputGuards = append(inputGuards, g)
+				outputGuards = append(outputGuards, g)
+			} else {
+				f := content.NewFilter(true, action, cfg.Categories)
+				inputGuards = append(inputGuards, f)
+				outputGuards = append(outputGuards, f)
+			}
+
+		case "custom_keywords":
+			var cfg struct {
+				Blocked []string `json:"blocked"`
+			}
+			_ = json.Unmarshal(rec.ConfigJSON, &cfg)
+			if len(cfg.Blocked) > 0 {
+				f := keyword.NewFilter(true, action, cfg.Blocked)
+				inputGuards = append(inputGuards, f)
+				outputGuards = append(outputGuards, f)
+			}
+
+		case "llm_judge":
+			// llm_judge is not a standalone guardrail; it provides config for others.
+		}
+	}
+
+	if len(inputGuards) == 0 && len(outputGuards) == 0 {
+		return nil
+	}
+
+	logger.Info("guardrails enabled",
+		"input_count", len(inputGuards),
+		"output_count", len(outputGuards))
+	return guardrail.NewPipeline(inputGuards, outputGuards, logger)
+}
+
+// buildPipelineFromConfig constructs a Pipeline directly from config (used as fallback).
+func buildPipelineFromConfig(cfg *config.Config, logger *slog.Logger) *guardrail.Pipeline {
 	gc := cfg.Guardrails
 
 	var inputGuards, outputGuards []guardrail.Guardrail
@@ -728,7 +878,6 @@ func buildGuardrailPipeline(cfg *config.Config, logger *slog.Logger) *guardrail.
 		}
 	}
 
-	// PII: applied to both input and output
 	if gc.PII.Enabled {
 		action := guardrail.Action(gc.PII.Action)
 		d := pii.NewDetector(true, action, gc.PII.Categories)
@@ -736,7 +885,6 @@ func buildGuardrailPipeline(cfg *config.Config, logger *slog.Logger) *guardrail.
 		outputGuards = append(outputGuards, d)
 	}
 
-	// Prompt injection: input only
 	if gc.PromptInjection.Enabled {
 		action := guardrail.Action(gc.PromptInjection.Action)
 		if gc.PromptInjection.Engine == "llm" && judge != nil {
@@ -746,7 +894,6 @@ func buildGuardrailPipeline(cfg *config.Config, logger *slog.Logger) *guardrail.
 		}
 	}
 
-	// Content filter: both directions
 	if gc.ContentFilter.Enabled {
 		action := guardrail.Action(gc.ContentFilter.Action)
 		if gc.ContentFilter.Engine == "llm" && judge != nil {
@@ -760,7 +907,6 @@ func buildGuardrailPipeline(cfg *config.Config, logger *slog.Logger) *guardrail.
 		}
 	}
 
-	// Custom keywords: both directions
 	if gc.CustomKeywords.Enabled && len(gc.CustomKeywords.Blocked) > 0 {
 		f := keyword.NewFilter(true, guardrail.Action(gc.CustomKeywords.Action), gc.CustomKeywords.Blocked)
 		inputGuards = append(inputGuards, f)

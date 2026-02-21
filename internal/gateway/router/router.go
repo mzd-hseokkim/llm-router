@@ -43,7 +43,7 @@ func Setup(
 	budgetMgr *budget.Manager,
 	costCalc *cost.Calculator,
 	cacheMw *middleware.CacheMiddleware,
-	guardrailPipeline *guardrail.Pipeline,
+	guardrailMgr *guardrail.Manager,
 	advancedRouter AdvancedResolverIface,
 	promptSvc *prompt.Service,
 	abTestMw *middleware.ABTestMiddleware,
@@ -73,9 +73,9 @@ func Setup(
 			r.Use(cacheMw.Handler())
 		}
 
-		// Guardrail middleware
-		if guardrailPipeline != nil {
-			r.Use(middleware.GuardrailCheck(guardrailPipeline))
+		// Guardrail middleware (always mounted when manager is set; nil pipeline = passthrough)
+		if guardrailMgr != nil {
+			r.Use(middleware.GuardrailCheck(guardrailMgr))
 		}
 
 		// Data residency: extract policy from request header and store in context.
