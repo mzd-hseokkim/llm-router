@@ -694,6 +694,24 @@ export interface AlertHistoryEntry {
   sent_at: string;
 }
 
+export interface AlertChannelConfig {
+  slack?: { webhook_url: string; enabled: boolean };
+  email?: { addresses: string[]; enabled: boolean };
+  webhook?: { url: string; enabled: boolean };
+}
+
+export interface AlertConditions {
+  budget_threshold_pct?: number;
+  error_rate_threshold?: number;
+  latency_threshold_ms?: number;
+}
+
+export interface AlertConfig {
+  channels: AlertChannelConfig;
+  conditions: AlertConditions;
+  enabled: boolean;
+}
+
 export const alerts = {
   test: (channel?: string) =>
     apiFetch<{ status: string }>(`/alerts/test${channel ? `?channel=${channel}` : ""}`, {
@@ -703,6 +721,12 @@ export const alerts = {
     apiFetch<{ history: AlertHistoryEntry[] }>(`/alerts/history?limit=${limit}`).then(
       (r) => r.history
     ),
+  getConfig: () => apiFetch<AlertConfig>("/alerts/config"),
+  updateConfig: (payload: Partial<AlertConfig>) =>
+    apiFetch<AlertConfig>("/alerts/config", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
 };
 
 // --- Reports ---

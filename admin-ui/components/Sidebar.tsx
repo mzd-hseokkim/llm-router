@@ -13,6 +13,7 @@ const nav = [
   { href: "/guardrails", label: "Guardrails" },
   { href: "/usage", label: "Usage" },
   { href: "/logs", label: "Logs" },
+  { href: "/alerts", label: "Alerts" },
 ];
 
 export default function Sidebar() {

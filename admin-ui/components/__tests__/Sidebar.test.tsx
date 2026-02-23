@@ -29,6 +29,7 @@ describe('Sidebar', () => {
     expect(screen.getByText('Guardrails')).toBeInTheDocument()
     expect(screen.getByText('Usage')).toBeInTheDocument()
     expect(screen.getByText('Logs')).toBeInTheDocument()
+    expect(screen.getByText('Alerts')).toBeInTheDocument()
   })
 
   it('renders correct href for nav links', () => {
