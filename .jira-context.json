@@ -1,0 +1,12 @@
+{
+  "taskId": "ATL-279",
+  "branch": "feature/ATL-279",
+  "worktreePath": "C:/WORK/workspace/llm-router_worktree/ATL-279",
+  "baseBranch": "main",
+  "summary": "[LLM Router] Embeddings API 구현 (/v1/embeddings)",
+  "priority": "주요",
+  "status": "In Progress",
+  "completedSteps": ["init", "start", "plan", "design", "impl", "test", "review"],
+  "initializedAt": "2026-02-23T17:00:00+09:00",
+  "startedAt": "2026-02-23T17:00:00+09:00"
+}

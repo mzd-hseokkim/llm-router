@@ -30,6 +30,12 @@ type Provider interface {
 	ChatCompletionStream(ctx context.Context, model string, req *types.ChatCompletionRequest, rawBody []byte) (<-chan StreamChunk, error)
 }
 
+// EmbeddingProvider is implemented by adapters that support the embeddings API.
+// Not all providers support embeddings; handlers should type-assert before use.
+type EmbeddingProvider interface {
+	Embed(ctx context.Context, model string, req *types.EmbeddingRequest) (*types.EmbeddingResponse, error)
+}
+
 // ModelOverridable is implemented by adapters that support DB-injected model lists.
 type ModelOverridable interface {
 	SetModels(models []types.ModelInfo)

@@ -223,7 +223,7 @@ func main() {
 
 	// /v1 routes — protected by virtual key auth
 	chatHandler := router.Setup(r, registry, fr, buildFallbackChains(cfg.Routing), logger,
-		authMw.Middleware, logWriter, tracker, rateLimiter, budgetMgr, costCalc, cacheMw, guardrailMgr, activeAdvRouter, promptSvc, abTestMw, residencyEnforcer)
+		authMw.Middleware, logWriter, tracker, rateLimiter, budgetMgr, costCalc, cacheMw, guardrailMgr, activeAdvRouter, promptSvc, abTestMw, residencyEnforcer, ec)
 
 	// Subscribe chat handler to routing config changes so that PUT /admin/routing
 	// immediately updates the active fallback chains.

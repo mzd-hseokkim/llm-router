@@ -118,3 +118,24 @@ models:
     provider: cohere
     input_per_million_tokens: 0.15
     output_per_million_tokens: 0.60
+
+  embed-english-v3.0:
+    provider: cohere
+    input_per_million_tokens: 0.10
+    output_per_million_tokens: 0.00
+
+  embed-multilingual-v3.0:
+    provider: cohere
+    input_per_million_tokens: 0.10
+    output_per_million_tokens: 0.00
+
+  embed-english-light-v3.0:
+    provider: cohere
+    input_per_million_tokens: 0.10
+    output_per_million_tokens: 0.00
+
+  # Google Embeddings
+  text-embedding-004:
+    provider: google
+    input_per_million_tokens: 0.00
+    output_per_million_tokens: 0.00

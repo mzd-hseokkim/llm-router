@@ -53,6 +53,52 @@ func TestBuildKey_DifferentMessages(t *testing.T) {
 	}
 }
 
+func TestBuildEmbeddingKey_NonEmpty(t *testing.T) {
+	req := &types.EmbeddingRequest{
+		Model: "openai/text-embedding-3-small",
+		Input: []byte(`"hello"`),
+	}
+	k := BuildEmbeddingKey(req)
+	if k == "" {
+		t.Error("BuildEmbeddingKey returned empty string")
+	}
+}
+
+func TestBuildEmbeddingKey_WhitespaceNormalization(t *testing.T) {
+	r1 := &types.EmbeddingRequest{Model: "m", Input: []byte(`"a"`)}
+	r2 := &types.EmbeddingRequest{Model: "m", Input: []byte(`"a"`)}
+	// Same content, same key.
+	if BuildEmbeddingKey(r1) != BuildEmbeddingKey(r2) {
+		t.Error("identical requests should produce the same key")
+	}
+}
+
+func TestBuildEmbeddingKey_DifferentModel(t *testing.T) {
+	r1 := &types.EmbeddingRequest{Model: "m1", Input: []byte(`"hello"`)}
+	r2 := &types.EmbeddingRequest{Model: "m2", Input: []byte(`"hello"`)}
+	if BuildEmbeddingKey(r1) == BuildEmbeddingKey(r2) {
+		t.Error("different models should produce different keys")
+	}
+}
+
+func TestIsEmbeddingCacheable(t *testing.T) {
+	t.Run("cacheable by default", func(t *testing.T) {
+		if !IsEmbeddingCacheable(nil) {
+			t.Error("should be cacheable without headers")
+		}
+	})
+	t.Run("no-cache header", func(t *testing.T) {
+		if IsEmbeddingCacheable(map[string]string{"Cache-Control": "no-cache"}) {
+			t.Error("should not cache with Cache-Control: no-cache")
+		}
+	})
+	t.Run("X-Gateway-No-Cache header", func(t *testing.T) {
+		if IsEmbeddingCacheable(map[string]string{"X-Gateway-No-Cache": "true"}) {
+			t.Error("should not cache with X-Gateway-No-Cache: true")
+		}
+	})
+}
+
 func TestIsCacheable(t *testing.T) {
 	mt := ptr(100)
 	t.Run("no max_tokens", func(t *testing.T) {

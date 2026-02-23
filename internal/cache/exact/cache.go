@@ -16,6 +16,7 @@ import (
 )
 
 const keyPrefix = "cache:exact:"
+const embKeyPrefix = "cache:emb:"
 
 // ErrResponseTooLarge is returned when a response exceeds the max size limit.
 var ErrResponseTooLarge = errors.New("response too large for cache")
@@ -125,6 +126,69 @@ func (c *Cache) DeleteByPattern(ctx context.Context, pattern string) error {
 		if cursor == 0 {
 			break
 		}
+	}
+	return nil
+}
+
+// EmbeddingEntry is the value stored in the embedding cache.
+type EmbeddingEntry struct {
+	Response    *types.EmbeddingResponse `json:"response"`
+	CreatedAt   int64                    `json:"created_at"`
+	Model       string                   `json:"model"`
+	InputTokens int                      `json:"input_tokens"`
+	CostUSD     float64                  `json:"cost_usd"`
+}
+
+// GetEmbedding retrieves a cached embedding. Returns (nil, nil) on cache miss.
+func (c *Cache) GetEmbedding(ctx context.Context, key string) (*EmbeddingEntry, error) {
+	data, err := c.client.Get(ctx, embKeyPrefix+key).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("cache get: %w", err)
+	}
+
+	decoded := maybeDecompress(data)
+
+	var entry EmbeddingEntry
+	if err := json.Unmarshal(decoded, &entry); err != nil {
+		return nil, fmt.Errorf("cache unmarshal: %w", err)
+	}
+	return &entry, nil
+}
+
+// StoreEmbedding saves an embedding response to the cache. TTL of 0 uses the default.
+func (c *Cache) StoreEmbedding(ctx context.Context, key string, resp *types.EmbeddingResponse, costUSD float64, ttl time.Duration) error {
+	if ttl == 0 {
+		ttl = c.defaultTTL
+	}
+
+	entry := EmbeddingEntry{
+		Response:  resp,
+		CreatedAt: time.Now().Unix(),
+		Model:     resp.Model,
+		CostUSD:   costUSD,
+	}
+	if resp.Usage != nil {
+		entry.InputTokens = resp.Usage.TotalTokens
+	}
+
+	data, err := json.Marshal(entry)
+	if err != nil {
+		return fmt.Errorf("cache marshal: %w", err)
+	}
+
+	if int64(len(data)) > c.maxResponseSize {
+		return ErrResponseTooLarge
+	}
+
+	if compressed, err := gzipCompress(data); err == nil && len(compressed) < len(data) {
+		data = compressed
+	}
+
+	if err := c.client.Set(ctx, embKeyPrefix+key, data, ttl).Err(); err != nil {
+		return fmt.Errorf("cache set: %w", err)
 	}
 	return nil
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/llm-router/gateway/internal/budget"
+	exactcache "github.com/llm-router/gateway/internal/cache/exact"
 	"github.com/llm-router/gateway/internal/cost"
 	"github.com/llm-router/gateway/internal/gateway/fallback"
 	"github.com/llm-router/gateway/internal/gateway/handler"
@@ -48,6 +49,7 @@ func Setup(
 	promptSvc *prompt.Service,
 	abTestMw *middleware.ABTestMiddleware,
 	residencyEnforcer *residency.Enforcer,
+	ec *exactcache.Cache,
 ) *handler.ChatHandler {
 	r.Use(middleware.Recovery(logger))
 	r.Use(middleware.RequestMeta)
@@ -105,7 +107,7 @@ func Setup(
 		comp := handler.NewCompletionsHandler(registry, logger)
 		r.Post("/completions", comp.Handle)
 
-		emb := handler.NewEmbeddingsHandler(registry, logger)
+		emb := handler.NewEmbeddingsHandler(registry, ec, costCalc, logger)
 		r.Post("/embeddings", emb.Handle)
 
 		models := handler.NewModelsHandler(registry, logger)

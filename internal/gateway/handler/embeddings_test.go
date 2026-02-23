@@ -2,13 +2,36 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/llm-router/gateway/internal/gateway/types"
+	"github.com/llm-router/gateway/internal/provider"
 )
+
+// mockEmbeddingProvider extends mockProvider with EmbeddingProvider support.
+type mockEmbeddingProvider struct {
+	mockProvider
+	embedResp *types.EmbeddingResponse
+	embedErr  error
+}
+
+func (m *mockEmbeddingProvider) Embed(_ context.Context, _ string, req *types.EmbeddingRequest) (*types.EmbeddingResponse, error) {
+	if m.embedErr != nil {
+		return nil, m.embedErr
+	}
+	if m.embedResp != nil {
+		return m.embedResp, nil
+	}
+	return &types.EmbeddingResponse{
+		Object: "list",
+		Data:   []types.Embedding{{Object: "embedding", Embedding: []float64{0.1, 0.2}, Index: 0}},
+		Model:  req.Model,
+	}, nil
+}
 
 func postEmbeddings(t *testing.T, h *EmbeddingsHandler, body any) *httptest.ResponseRecorder {
 	t.Helper()
@@ -32,7 +55,7 @@ func postEmbeddings(t *testing.T, h *EmbeddingsHandler, body any) *httptest.Resp
 
 func TestEmbeddingsHandler_StatusCodes(t *testing.T) {
 	mock := &mockProvider{name: "mock"}
-	h := NewEmbeddingsHandler(newTestRegistry(mock), discardLogger())
+	h := NewEmbeddingsHandler(newTestRegistry(mock), nil, nil, discardLogger())
 
 	tests := []struct {
 		name       string
@@ -40,9 +63,9 @@ func TestEmbeddingsHandler_StatusCodes(t *testing.T) {
 		wantStatus int
 	}{
 		{
-			name:       "valid request",
+			name:       "valid request — provider has no EmbeddingProvider",
 			body:       map[string]any{"model": "mock/embed-model", "input": "Hello"},
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusBadRequest, // mock doesn't implement EmbeddingProvider
 		},
 		{
 			name:       "missing model",
@@ -76,9 +99,65 @@ func TestEmbeddingsHandler_StatusCodes(t *testing.T) {
 	}
 }
 
-func TestEmbeddingsHandler_ResponseFormat(t *testing.T) {
+func TestEmbeddingsHandler_SuccessWithEmbeddingProvider(t *testing.T) {
+	mock := &mockEmbeddingProvider{mockProvider: mockProvider{name: "mock"}}
+	h := NewEmbeddingsHandler(newTestRegistry(mock), nil, nil, discardLogger())
+
+	w := postEmbeddings(t, h, map[string]any{"model": "mock/embed-model", "input": "Hello"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body)
+	}
+
+	var resp types.EmbeddingResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Object != "list" {
+		t.Errorf("object: got %q, want %q", resp.Object, "list")
+	}
+	if len(resp.Data) == 0 || len(resp.Data[0].Embedding) == 0 {
+		t.Error("expected non-empty embedding data")
+	}
+}
+
+func TestEmbeddingsHandler_UnsupportedProvider(t *testing.T) {
+	// mockProvider does NOT implement EmbeddingProvider.
 	mock := &mockProvider{name: "mock"}
-	h := NewEmbeddingsHandler(newTestRegistry(mock), discardLogger())
+	h := NewEmbeddingsHandler(newTestRegistry(mock), nil, nil, discardLogger())
+
+	w := postEmbeddings(t, h, map[string]any{"model": "mock/embed", "input": "Hello"})
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestEmbeddingsHandler_ProviderError(t *testing.T) {
+	mock := &mockEmbeddingProvider{
+		mockProvider: mockProvider{name: "mock"},
+		embedErr:     &provider.GatewayError{Code: provider.ErrProviderError, Message: "upstream error", HTTPStatus: 502},
+	}
+	h := NewEmbeddingsHandler(newTestRegistry(mock), nil, nil, discardLogger())
+
+	w := postEmbeddings(t, h, map[string]any{"model": "mock/embed", "input": "Hello"})
+	if w.Code != http.StatusBadGateway {
+		t.Errorf("status = %d, want 502", w.Code)
+	}
+}
+
+func TestEmbeddingsHandler_NilCacheWorks(t *testing.T) {
+	mock := &mockEmbeddingProvider{mockProvider: mockProvider{name: "mock"}}
+	// nil cache and costCalc — should work fine.
+	h := NewEmbeddingsHandler(newTestRegistry(mock), nil, nil, discardLogger())
+
+	w := postEmbeddings(t, h, map[string]any{"model": "mock/embed", "input": "Hello"})
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200; body = %s", w.Code, w.Body)
+	}
+}
+
+func TestEmbeddingsHandler_ResponseFormat(t *testing.T) {
+	mock := &mockEmbeddingProvider{mockProvider: mockProvider{name: "mock"}}
+	h := NewEmbeddingsHandler(newTestRegistry(mock), nil, nil, discardLogger())
 
 	w := postEmbeddings(t, h, map[string]any{"model": "mock/embed-model", "input": "Hello"})
 
