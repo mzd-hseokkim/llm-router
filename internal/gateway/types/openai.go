@@ -111,6 +111,23 @@ type CompletionChoice struct {
 	FinishReason string `json:"finish_reason"`
 }
 
+// CompletionStreamChunk is a single SSE chunk in a streaming text completion response.
+type CompletionStreamChunk struct {
+	ID      string                   `json:"id"`
+	Object  string                   `json:"object"` // "text_completion"
+	Created int64                    `json:"created"`
+	Model   string                   `json:"model"`
+	Choices []CompletionStreamChoice `json:"choices"`
+	Usage   *Usage                   `json:"usage,omitempty"`
+}
+
+// CompletionStreamChoice is a single choice in a streaming text completion chunk.
+type CompletionStreamChoice struct {
+	Index        int    `json:"index"`
+	Text         string `json:"text"`
+	FinishReason string `json:"finish_reason,omitempty"`
+}
+
 // EmbeddingRequest is the OpenAI-compatible embeddings request.
 type EmbeddingRequest struct {
 	Model          string          `json:"model"`

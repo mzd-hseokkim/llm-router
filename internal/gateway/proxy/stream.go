@@ -206,6 +206,117 @@ func newStreamID() string {
 	return fmt.Sprintf("chatcmpl-%x", b)
 }
 
+func newCmplStreamID() string {
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("cmpl-%d", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("cmpl-%x", b)
+}
+
+// StreamTextChannelToClient streams an already-opened provider channel to the HTTP client
+// as SSE in the legacy text_completion format (/v1/completions).
+func StreamTextChannelToClient(
+	w http.ResponseWriter,
+	r *http.Request,
+	chunks <-chan provider.StreamChunk,
+	model, providerName string,
+	logger *slog.Logger,
+) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported by server", http.StatusInternalServerError)
+		return
+	}
+
+	ctx := r.Context()
+
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-transform")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	rc := http.NewResponseController(w)
+
+	id := newCmplStreamID()
+	created := time.Now().Unix()
+
+	ka := time.NewTicker(keepaliveInterval)
+	defer ka.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+
+		case <-ka.C:
+			resetWriteDeadline(rc)
+			fmt.Fprint(w, ": keepalive\n\n")
+			flusher.Flush()
+
+		case chunk, open := <-chunks:
+			if !open {
+				resetWriteDeadline(rc)
+				fmt.Fprint(w, "data: [DONE]\n\n")
+				flusher.Flush()
+				return
+			}
+
+			if chunk.Error != nil {
+				logger.Error("stream chunk error",
+					"provider", providerName,
+					"error", chunk.Error)
+				telemetry.SetError(ctx, "stream_error", chunk.Error.Error())
+				writeSSEError(w, chunk.Error.Error())
+				flusher.Flush()
+				return
+			}
+
+			if chunk.Delta != "" {
+				telemetry.RecordTTFT(ctx)
+			}
+			if chunk.Usage != nil {
+				telemetry.SetTokens(ctx, chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens, chunk.Usage.TotalTokens)
+			}
+			if chunk.FinishReason != nil {
+				telemetry.SetFinishReason(ctx, *chunk.FinishReason)
+			}
+
+			resetWriteDeadline(rc)
+			writeTextChunk(w, buildTextChunk(id, created, model, chunk))
+			flusher.Flush()
+		}
+	}
+}
+
+// buildTextChunk converts a provider.StreamChunk to the legacy text_completion SSE chunk format.
+func buildTextChunk(id string, created int64, model string, sc provider.StreamChunk) types.CompletionStreamChunk {
+	c := types.CompletionStreamChunk{
+		ID:      id,
+		Object:  "text_completion",
+		Created: created,
+		Model:   model,
+		Usage:   sc.Usage,
+	}
+	fr := ""
+	if sc.FinishReason != nil {
+		fr = *sc.FinishReason
+	}
+	c.Choices = []types.CompletionStreamChoice{{
+		Index:        0,
+		Text:         sc.Delta,
+		FinishReason: fr,
+	}}
+	return c
+}
+
+func writeTextChunk(w http.ResponseWriter, chunk types.CompletionStreamChunk) {
+	data, _ := json.Marshal(chunk)
+	fmt.Fprintf(w, "data: %s\n\n", data)
+}
+
 // StreamChannelToClient streams an already-opened provider channel to the HTTP client as SSE.
 // Use this when the stream has been opened by a FallbackRouter (so no retry/fallback is done here).
 func StreamChannelToClient(

@@ -104,7 +104,7 @@ func Setup(
 		}
 		r.Post("/chat/completions", chat.Handle)
 
-		comp := handler.NewCompletionsHandler(registry, logger)
+		comp := handler.NewCompletionsHandler(fr, logger)
 		r.Post("/completions", comp.Handle)
 
 		emb := handler.NewEmbeddingsHandler(registry, ec, costCalc, logger)
