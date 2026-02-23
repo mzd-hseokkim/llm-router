@@ -49,7 +49,7 @@ export default function LoginPage() {
         setError(data.error ?? "Login failed");
         return;
       }
-      router.push("/dashboard");
+      router.push("/");
     } catch {
       setError("Network error — please try again");
     } finally {
