@@ -1,41 +1,31 @@
-# ATL-279: [LLM Router] Embeddings API 구현 (/v1/embeddings)
+# ATL-293: [LLM Router] Admin UI 컴포넌트 테스트 구축 (vitest + testing-library)
 
 ## Issue Details
-- **Key**: ATL-279
-- **Summary**: [LLM Router] Embeddings API 구현 (/v1/embeddings)
-- **Type**: 작업
+- **Key**: ATL-293
+- **Summary**: [LLM Router] Admin UI 컴포넌트 테스트 구축 (vitest + testing-library)
+- **Type**: Task
 - **Priority**: 주요
-- **Status**: In Progress
-- **Branch**: feature/ATL-279
-- **Worktree**: C:/WORK/workspace/llm-router_worktree/ATL-279
+- **Status**: 진행 중
+- **Branch**: feature/ATL-293
+- **Worktree**: /c/WORK/workspace/llm-router_worktree/ATL-293
+- **Initialized**: 2026-02-23
 - **Started**: 2026-02-23
 
 ## Description
-
 ### 현황
-`internal/gateway/handler/embeddings.go` 골격만 존재, 실제 처리 로직 미구현
+`admin-ui`에 테스트 파일 없음
 
 ### 필요 작업
-- Provider별 임베딩 API 호출 구현 (OpenAI, Gemini, Cohere 지원)
-- 임베딩 결과 캐싱 연동 (exact-match)
-- 비용 추적 (임베딩 토큰 단가 테이블)
-- 라우터 등록 (`/v1/embeddings`)
-- E2E 테스트 추가
+- vitest + @testing-library/react 설정
+- 신규 페이지 컴포넌트 단위 테스트 작성
+- 공통 컴포넌트 테스트 작성
 
-## Acceptance Criteria
-- `/v1/embeddings` 엔드포인트 등록 및 정상 동작
-- OpenAI, Gemini, Cohere provider 라우팅 지원
-- 임베딩 결과 캐싱 (exact-match, Redis)
-- 토큰 사용량 및 비용 추적 (provider별 임베딩 단가)
-- E2E 테스트 작성
+### 우선순위
+중간 — 신규 페이지 추가 시 함께 작성 권장
 
 ## Workflow
-1. ✅ `init` — worktree 생성
-2. ✅ `start` — 작업 시작 (현재)
-3. `/jira-task plan ATL-279` — 기획 문서 작성
-4. `/jira-task design ATL-279` — 설계 문서 작성
-5. `/jira-task impl ATL-279` — 구현
-6. `/jira-task test ATL-279` — 테스트 실행
-7. `/jira-task review ATL-279` — 코드 리뷰
-8. `/jira-task pr ATL-279` — PR 생성
-9. `/jira-task done ATL-279` — 완료 처리
+1. `cd /c/WORK/workspace/llm-router_worktree/ATL-293` 로 이동
+2. 구현 작업 수행
+3. `/jira-task test ATL-293` 로 테스트
+4. `/jira-task review ATL-293` 로 코드 리뷰
+5. `/jira-task done ATL-293` 로 완료 처리
