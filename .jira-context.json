@@ -1,12 +1,17 @@
 {
-  "taskId": "ATL-279",
-  "branch": "feature/ATL-279",
-  "worktreePath": "C:/WORK/workspace/llm-router_worktree/ATL-279",
+  "taskId": "ATL-293",
+  "branch": "feature/ATL-293",
+  "worktreePath": "C:/WORK/workspace/llm-router_worktree/ATL-293",
+  "repoRoot": "C:/WORK/workspace/llm-router",
   "baseBranch": "main",
-  "summary": "[LLM Router] Embeddings API 구현 (/v1/embeddings)",
+  "summary": "[LLM Router] Admin UI 컴포넌트 테스트 구축 (vitest + testing-library)",
   "priority": "주요",
-  "status": "In Progress",
-  "completedSteps": ["init", "start", "plan", "design", "impl", "test", "review"],
-  "initializedAt": "2026-02-23T17:00:00+09:00",
-  "startedAt": "2026-02-23T17:00:00+09:00"
+  "status": "진행 중",
+  "completedSteps": ["init", "start", "plan", "impl", "test", "review"],
+  "initializedAt": "2026-02-23T09:00:00+09:00",
+  "startedAt": "2026-02-23T21:06:40+09:00",
+  "plannedAt": "2026-02-23T21:13:47+09:00",
+  "implAt": "2026-02-23T21:20:41+09:00",
+  "testedAt": "2026-02-23T21:28:24+09:00",
+  "reviewedAt": "2026-02-23T21:31:21+09:00"
 }
