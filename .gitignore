@@ -57,3 +57,7 @@ admin-ui/.env
 admin-ui/.env.local
 admin-ui/.env.*.local
 admin-ui/tsconfig.tsbuildinfo
+
+# Jira integration (local dev context)
+.jira-context.json
+TASK-README.md

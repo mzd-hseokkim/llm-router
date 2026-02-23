@@ -2,12 +2,13 @@
 
 다양한 LLM Provider(OpenAI, Anthropic, Gemini 등)를 단일 OpenAI-compatible 엔드포인트로 통합하는 API Gateway.
 
-클라이언트는 `base_url`만 변경하면 기존 OpenAI SDK를 그대로 사용할 수 있으며, Gateway가 라우팅·인증·비용 관리·모니터링을 중앙에서 처리한다.
+클라이언트는 `base_url`만 변경하면 기존 OpenAI SDK를 그대로 사용할 수 있으며, Gateway가 라우팅·인증·캐싱·비용 관리·가드레일·멀티테넌시·관측성을 중앙에서 처리한다.
 
 ---
 
 ## 목차
 
+- [주요 기능](#주요-기능)
 - [사전 요구사항](#사전-요구사항)
 - [빠른 시작](#빠른-시작)
 - [Provider API Key 설정](#provider-api-key-설정)
@@ -15,6 +16,30 @@
 - [Admin 대시보드](#admin-대시보드)
 - [Admin API 주요 기능](#admin-api-주요-기능)
 - [빌드 및 테스트](#빌드-및-테스트)
+
+---
+
+## 주요 기능
+
+| 기능 | 설명 |
+|---|---|
+| **Zero-Exposure 키 보안** | Provider API 키를 AES-256-GCM으로 암호화. 클라이언트에는 가상 키(Virtual Key)만 노출 |
+| **자동 폴백 & 서킷 브레이커** | 가중 로드 밸런싱, Provider 장애 시 자동 전환. 이상 Provider는 서킷 브레이커로 격리 |
+| **비용 제어 & 차지백** | 팀/키별 Soft/Hard 예산 한도, 실시간 비용 추적, 자동 차지백 리포트 |
+| **정확 매칭 캐싱** | temperature=0 요청을 Redis에 캐싱. 동일 프롬프트는 모델 호출 없이 즉시 응답 |
+| **시맨틱 캐싱** | 임베딩 + pgvector 코사인 유사도 검색으로 의미상 유사한 요청도 캐시 히트 |
+| **가드레일** | PII 마스킹, 프롬프트 인젝션 차단, 콘텐츠 필터 — 토큰 소모 전 게이트웨이 레이어에서 처리 |
+| **멀티테넌시 & RBAC** | Org > Team > User > Key 4단계 계층 구조, 역할 기반 접근 제어 |
+| **OAuth/SSO** | Google·GitHub·Okta·커스텀 OIDC 인증 지원 |
+| **고급 라우팅** | 메타데이터, 컨텍스트 길이, 시간대 조건 기반 라우팅 규칙 |
+| **ML 기반 지능형 라우팅** | 비용-품질 최적화 자동 Provider 선택 |
+| **A/B 테스트** | Provider 간 트래픽 분할, 통계 분석, 자동 승자 전환 |
+| **프롬프트 관리** | 버전 관리, 템플릿, 팀 간 공유 |
+| **완전한 관측성** | OpenTelemetry 트레이싱, Prometheus 메트릭, 불변 감사 로그, Slack/이메일/Webhook 알림 |
+| **MCP Gateway** | Model Context Protocol 중앙 허브 |
+| **자체 호스팅 모델** | Ollama·vLLM·TGI 로컬 모델 연동 |
+| **데이터 레지던시** | GDPR·HIPAA 지역 제한 강제 라우팅 |
+| **온프레미스 배포** | Helm Chart, 단일 바이너리, 에어갭 지원 |
 
 ---
 
@@ -98,6 +123,8 @@ GEMINI_API_KEY=AIza...
 | AWS Bedrock | `bedrock/claude-3-5-sonnet` |
 | Mistral | `mistral/mistral-large` |
 | Cohere | `cohere/command-r-plus` |
+| Ollama | `ollama/llama3`, `ollama/mistral` |
+| vLLM | `vllm/llama-3.1-8b` |
 
 ---
 
@@ -204,6 +231,11 @@ npm run dev
 | 라우팅 규칙 | `/dashboard/routing` | 조건부 라우팅 규칙 설정 |
 | 사용량 로그 | `/dashboard/logs` | 요청별 상세 로그·토큰 수·비용 |
 | 예산 관리 | `/dashboard/budgets` | 팀·키별 월간 예산 설정 |
+| 가드레일 | `/guardrails` | PII 마스킹·프롬프트 인젝션·콘텐츠 필터 런타임 설정 |
+| 조직/팀 관리 | `/orgs` | Org > Team > User 계층 관리 |
+| A/B 테스트 | `/ab-tests` | Provider 간 트래픽 분할 및 통계 |
+| 프롬프트 관리 | `/prompts` | 프롬프트 버전 관리·템플릿·팀 공유 |
+| MCP Gateway | `/mcp` | Model Context Protocol 서버 등록·관리 |
 | 감사 로그 | `/dashboard/audit` | 불변 감사 추적 |
 | 알림 | `/dashboard/alerts` | Slack·Email·Webhook 알림 설정 |
 
@@ -241,15 +273,58 @@ curl http://localhost:8080/admin/providers \
 # Provider 상태 (헬스체크)
 curl http://localhost:8080/health/providers \
   -H "Authorization: Bearer admin123"
+
+# 서킷 브레이커 상태
+curl http://localhost:8080/admin/circuit-breakers \
+  -H "Authorization: Bearer admin123"
+```
+
+### 가드레일 설정
+
+```bash
+# 가드레일 정책 조회
+curl http://localhost:8080/admin/guardrails \
+  -H "Authorization: Bearer admin123"
+
+# 가드레일 정책 업데이트 (런타임 즉시 반영)
+curl -X PUT http://localhost:8080/admin/guardrails \
+  -H "Authorization: Bearer admin123" \
+  -H "Content-Type: application/json" \
+  -d '{"guardrail_type": "pii_masking", "enabled": true, "config": {}}'
+```
+
+### 예산 관리
+
+```bash
+# 예산 생성
+curl -X POST http://localhost:8080/admin/budgets \
+  -H "Authorization: Bearer admin123" \
+  -H "Content-Type: application/json" \
+  -d '{"entity_type": "key", "entity_id": "<key_id>", "amount": 100.00, "period": "monthly"}'
 ```
 
 ### 사용량 통계
 
 ```bash
+# 사용량 요약
+curl "http://localhost:8080/admin/usage/summary?entity_type=key&entity_id=<key_id>" \
+  -H "Authorization: Bearer admin123"
+
 # 전체 사용량
 curl "http://localhost:8080/admin/usage?period=day" \
   -H "Authorization: Bearer admin123"
 ```
+
+### 감사 로그
+
+```bash
+curl http://localhost:8080/admin/audit-logs \
+  -H "Authorization: Bearer admin123"
+```
+
+### OpenAPI 문서
+
+서버 실행 중 브라우저에서 **http://localhost:8080/docs** 접속 (Swagger UI).
 
 ---
 
