@@ -9,11 +9,13 @@ const nav = [
   { href: "/playground", label: "Playground" },
   { href: "/keys", label: "Virtual Keys" },
   { href: "/providers", label: "Providers" },
+  { href: "/prompts", label: "Prompts" },
   { href: "/orgs", label: "Organizations" },
   { href: "/guardrails", label: "Guardrails" },
   { href: "/usage", label: "Usage" },
   { href: "/logs", label: "Logs" },
   { href: "/alerts", label: "Alerts" },
+  { href: "/audit", label: "Audit Logs" },
 ];
 
 export default function Sidebar() {

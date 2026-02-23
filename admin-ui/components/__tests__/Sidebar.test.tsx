@@ -30,6 +30,7 @@ describe('Sidebar', () => {
     expect(screen.getByText('Usage')).toBeInTheDocument()
     expect(screen.getByText('Logs')).toBeInTheDocument()
     expect(screen.getByText('Alerts')).toBeInTheDocument()
+    expect(screen.getByText('Audit Logs')).toBeInTheDocument()
   })
 
   it('renders correct href for nav links', () => {
@@ -38,6 +39,7 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: 'Virtual Keys' })).toHaveAttribute('href', '/keys')
     expect(screen.getByRole('link', { name: 'Providers' })).toHaveAttribute('href', '/providers')
     expect(screen.getByRole('link', { name: 'Organizations' })).toHaveAttribute('href', '/orgs')
+    expect(screen.getByRole('link', { name: 'Audit Logs' })).toHaveAttribute('href', '/audit')
   })
 
   it('renders Sign out button', () => {
