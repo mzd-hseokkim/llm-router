@@ -518,7 +518,7 @@ export interface CreatePromptPayload {
 export const prompts = {
   list: (teamId?: string) =>
     apiFetch<{ data: Prompt[] }>(`/prompts${teamId ? `?team_id=${teamId}` : ""}`).then(
-      (r) => r.data
+      (r) => r.data ?? []
     ),
   get: (slug: string) =>
     apiFetch<{ prompt: Prompt; version: PromptVersion }>(`/prompts/${slug}`),

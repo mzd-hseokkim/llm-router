@@ -52,6 +52,8 @@ func PromptInjector(svc *prompt.Service, logger *slog.Logger) func(http.Handler)
 			messages = append(messages, req.Messages...)
 			req.Messages = messages
 
+			slug := req.PromptSlug
+
 			// Clear gateway-specific fields before forwarding.
 			req.PromptSlug = ""
 			req.PromptVariables = nil
@@ -66,7 +68,7 @@ func PromptInjector(svc *prompt.Service, logger *slog.Logger) func(http.Handler)
 			r.Body = io.NopCloser(bytes.NewReader(newBody))
 			r.ContentLength = int64(len(newBody))
 
-			logger.Debug("prompt injected", "slug", req.PromptSlug)
+			logger.Debug("prompt injected", "slug", slug)
 			next.ServeHTTP(w, r)
 		})
 	}

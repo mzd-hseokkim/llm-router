@@ -11,23 +11,23 @@ import (
 
 // Event represents a single auditable action.
 type Event struct {
-	ID           *uuid.UUID
-	EventType    string
-	Action       string
-	ActorType    string
-	ActorID      *uuid.UUID
-	ActorEmail   string
-	IPAddress    string
-	UserAgent    string
-	ResourceType string
-	ResourceID   *uuid.UUID
-	ResourceName string
-	Changes      map[string]any // {"before": {...}, "after": {...}, "changed_fields": [...]}
-	Metadata     map[string]any
-	RequestID    string
-	OrgID        *uuid.UUID
-	TeamID       *uuid.UUID
-	Timestamp    time.Time
+	ID           *uuid.UUID     `json:"id"`
+	EventType    string         `json:"event_type"`
+	Action       string         `json:"action"`
+	ActorType    string         `json:"actor_type"`
+	ActorID      *uuid.UUID     `json:"actor_id"`
+	ActorEmail   string         `json:"actor_email"`
+	IPAddress    string         `json:"ip_address"`
+	UserAgent    string         `json:"user_agent"`
+	ResourceType string         `json:"resource_type"`
+	ResourceID   *uuid.UUID     `json:"resource_id"`
+	ResourceName string         `json:"resource_name"`
+	Changes      map[string]any `json:"changes"` // {"before": {...}, "after": {...}, "changed_fields": [...]}
+	Metadata     map[string]any `json:"metadata"`
+	RequestID    string         `json:"request_id"`
+	OrgID        *uuid.UUID     `json:"org_id"`
+	TeamID       *uuid.UUID     `json:"team_id"`
+	Timestamp    time.Time      `json:"timestamp"`
 }
 
 // Store persists audit events.

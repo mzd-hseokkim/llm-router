@@ -5,12 +5,24 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/llm-router/gateway/internal/config"
 )
+
+// RuntimeConfig is the mutable alert configuration exposed via the admin API.
+type RuntimeConfig struct {
+	Enabled    bool                   `json:"enabled"`
+	Channels   map[string]interface{} `json:"channels"`
+	Conditions struct {
+		BudgetThresholdPct  *float64 `json:"budget_threshold_pct,omitempty"`
+		ErrorRateThreshold  *float64 `json:"error_rate_threshold,omitempty"`
+		LatencyThresholdMs  *int     `json:"latency_threshold_ms,omitempty"`
+	} `json:"conditions"`
+}
 
 // routeRule maps event patterns and severity to a set of notifiers.
 type routeRule struct {
@@ -21,10 +33,13 @@ type routeRule struct {
 
 // Router dispatches Alert Events to the appropriate channels.
 type Router struct {
-	rules []routeRule
-	dedup *Deduplicator
-	pool  *pgxpool.Pool
+	rules  []routeRule
+	dedup  *Deduplicator
+	pool   *pgxpool.Pool
 	logger *slog.Logger
+
+	mu  sync.RWMutex
+	cfg RuntimeConfig
 }
 
 // NewRouter builds a Router from the alerting config.
@@ -53,12 +68,57 @@ func NewRouter(
 		})
 	}
 
-	return &Router{
+	ar := &Router{
 		rules:  rules,
 		dedup:  dedup,
 		pool:   pool,
 		logger: logger,
 	}
+	ar.cfg = runtimeConfigFromYAML(cfg)
+	return ar
+}
+
+// runtimeConfigFromYAML converts the static YAML config to a RuntimeConfig.
+func runtimeConfigFromYAML(cfg config.AlertingConfig) RuntimeConfig {
+	channels := make(map[string]interface{})
+	for _, ch := range cfg.Channels {
+		switch ch.Type {
+		case "slack":
+			channels["slack"] = map[string]interface{}{
+				"webhook_url": ch.WebhookURL,
+				"enabled":     true,
+			}
+		case "email":
+			channels["email"] = map[string]interface{}{
+				"addresses": ch.To,
+				"enabled":   true,
+			}
+		case "webhook":
+			url := ch.URL
+			if url == "" {
+				url = ch.WebhookURL
+			}
+			channels["webhook"] = map[string]interface{}{
+				"url":     url,
+				"enabled": true,
+			}
+		}
+	}
+	return RuntimeConfig{Enabled: len(cfg.Channels) > 0, Channels: channels}
+}
+
+// GetConfig returns the current runtime alerting configuration.
+func (r *Router) GetConfig() RuntimeConfig {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.cfg
+}
+
+// UpdateConfig replaces the runtime alerting configuration.
+func (r *Router) UpdateConfig(cfg RuntimeConfig) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.cfg = cfg
 }
 
 // Dispatch sends the event to all matching channels (async, deduplication applied).

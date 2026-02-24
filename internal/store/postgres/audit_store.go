@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/llm-router/gateway/internal/audit"
@@ -141,14 +143,45 @@ func (s *AuditStore) List(ctx context.Context, f AuditFilter) ([]*audit.Event, i
 	var events []*audit.Event
 	for rows.Next() {
 		e := &audit.Event{}
-		var changesRaw, metaRaw []byte
+		var (
+			id, actorID, resourceID, orgID, teamID pgtype.UUID
+			actorEmail, ipAddr, userAgent          pgtype.Text
+			resourceType, resourceName, requestID  pgtype.Text
+			changesRaw, metaRaw                    []byte
+		)
 		if err := rows.Scan(
-			&e.ID, &e.EventType, &e.Action, &e.ActorType, &e.ActorID, &e.ActorEmail,
-			&e.IPAddress, &e.UserAgent, &e.ResourceType, &e.ResourceID, &e.ResourceName,
-			&changesRaw, &metaRaw, &e.RequestID, &e.OrgID, &e.TeamID, &e.Timestamp,
+			&id, &e.EventType, &e.Action, &e.ActorType, &actorID, &actorEmail,
+			&ipAddr, &userAgent, &resourceType, &resourceID, &resourceName,
+			&changesRaw, &metaRaw, &requestID, &orgID, &teamID, &e.Timestamp,
 		); err != nil {
 			return nil, 0, fmt.Errorf("audit: scan: %w", err)
 		}
+		if id.Valid {
+			u := uuid.UUID(id.Bytes)
+			e.ID = &u
+		}
+		if actorID.Valid {
+			u := uuid.UUID(actorID.Bytes)
+			e.ActorID = &u
+		}
+		if resourceID.Valid {
+			u := uuid.UUID(resourceID.Bytes)
+			e.ResourceID = &u
+		}
+		if orgID.Valid {
+			u := uuid.UUID(orgID.Bytes)
+			e.OrgID = &u
+		}
+		if teamID.Valid {
+			u := uuid.UUID(teamID.Bytes)
+			e.TeamID = &u
+		}
+		e.ActorEmail = actorEmail.String
+		e.IPAddress = ipAddr.String
+		e.UserAgent = userAgent.String
+		e.ResourceType = resourceType.String
+		e.ResourceName = resourceName.String
+		e.RequestID = requestID.String
 		_ = json.Unmarshal(changesRaw, &e.Changes)
 		_ = json.Unmarshal(metaRaw, &e.Metadata)
 		events = append(events, e)

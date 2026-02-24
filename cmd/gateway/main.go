@@ -561,11 +561,13 @@ func registerAdminRoutes(
 			r.Get("/admin/audit-logs/security-events", auditHandler.SecurityEvents)
 		}
 
-		// Alerting endpoints
+		// Alerting endpoints — history and config are always available.
+		alertsHandler := handler.NewAdminAlertsHandler(alertRouter, pool)
+		r.Get("/admin/alerts/history", alertsHandler.History)
+		r.Get("/admin/alerts/config", alertsHandler.GetConfig)
+		r.Put("/admin/alerts/config", alertsHandler.UpdateConfig)
 		if alertRouter != nil {
-			alertsHandler := handler.NewAdminAlertsHandler(alertRouter, pool)
 			r.Post("/admin/alerts/test", alertsHandler.Test)
-			r.Get("/admin/alerts/history", alertsHandler.History)
 		}
 
 		// Prompt management

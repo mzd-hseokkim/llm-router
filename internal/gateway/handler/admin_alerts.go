@@ -75,7 +75,7 @@ func (h *AdminAlertsHandler) History(w http.ResponseWriter, r *http.Request) {
 		SentAt    string `json:"sent_at"`
 	}
 
-	var results []record
+	results := make([]record, 0)
 	for rows.Next() {
 		var rec record
 		var payloadRaw []byte
@@ -91,4 +91,35 @@ func (h *AdminAlertsHandler) History(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"history": results}) //nolint:errcheck
+}
+
+// GetConfig handles GET /admin/alerts/config.
+func (h *AdminAlertsHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
+	if h.router == nil {
+		// No alerting configured — return empty defaults.
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(alerting.RuntimeConfig{ //nolint:errcheck
+			Enabled:  false,
+			Channels: map[string]interface{}{},
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(h.router.GetConfig()) //nolint:errcheck
+}
+
+// UpdateConfig handles PUT /admin/alerts/config.
+func (h *AdminAlertsHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+	if h.router == nil {
+		http.Error(w, "alerting not configured", http.StatusServiceUnavailable)
+		return
+	}
+	var cfg alerting.RuntimeConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	h.router.UpdateConfig(cfg)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(cfg) //nolint:errcheck
 }
