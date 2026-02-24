@@ -130,7 +130,7 @@ export default function ReportsPage() {
                     </button>
                   </div>
                 </div>
-                {chargeback.by_team.length === 0 ? (
+                {(!chargeback.by_team || chargeback.by_team.length === 0) ? (
                   <p className="text-sm text-slate-400 text-center py-8">
                     해당 기간에 데이터가 없습니다.
                   </p>
