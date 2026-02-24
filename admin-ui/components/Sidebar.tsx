@@ -14,6 +14,7 @@ const nav = [
   { href: "/guardrails", label: "Guardrails" },
   { href: "/budgets", label: "Budgets" },
   { href: "/usage", label: "Usage" },
+  { href: "/reports", label: "Reports" },
   { href: "/logs", label: "Logs" },
   { href: "/alerts", label: "Alerts" },
   { href: "/audit", label: "Audit Logs" },

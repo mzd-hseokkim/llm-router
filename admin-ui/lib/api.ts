@@ -733,23 +733,54 @@ export const alerts = {
 
 // --- Reports ---
 
-export interface ChargebackBreakdown {
+export interface ChargebackSummary {
+  total_cost_usd: number;
+  total_tokens: number;
+  total_requests: number;
+}
+
+// NOTE: Go's ModelBreakdown/TagBreakdown have no json tags → PascalCase keys in JSON.
+export interface BillingModelBreakdown {
+  Model: string;
+  CostUSD: number;
+  Tokens: number;
+}
+
+export interface BillingTagBreakdown {
+  Tag: string;
+  CostUSD: number;
+}
+
+export interface TeamChargebackEntry {
   team_id: string;
   team_name: string;
-  cost: number;
+  cost_usd: number;
+  markup_usd: number;
+  total_charged_usd: number;
+  tokens: number;
+  requests: number;
+  by_model?: BillingModelBreakdown[];
+  by_project?: BillingTagBreakdown[];
 }
 
 export interface ChargebackReport {
   period: string;
-  total_cost: number;
-  breakdown: ChargebackBreakdown[];
+  generated_at: string;
+  currency: string;
+  summary: ChargebackSummary;
+  by_team: TeamChargebackEntry[];
 }
 
 export interface ShowbackReport {
-  team_id: string;
   period: string;
-  total_cost: number;
-  breakdown: unknown[];
+  generated_at: string;
+  team_id: string;
+  team_name: string;
+  cost_usd: number;
+  tokens: number;
+  requests: number;
+  by_model?: BillingModelBreakdown[];
+  by_project?: BillingTagBreakdown[];
 }
 
 export const reports = {
