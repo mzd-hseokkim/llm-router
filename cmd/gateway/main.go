@@ -548,8 +548,9 @@ func registerAdminRoutes(
 		}
 
 		// Cache admin endpoints
+		cacheHandler := handler.NewAdminCacheHandler(exactCache, logStore)
+		r.Get("/admin/cache/stats", cacheHandler.Stats)
 		if exactCache != nil {
-			cacheHandler := handler.NewAdminCacheHandler(exactCache)
 			r.Delete("/admin/cache/exact", cacheHandler.Delete)
 			r.Get("/admin/cache/exact/{hash}", cacheHandler.Get)
 		}

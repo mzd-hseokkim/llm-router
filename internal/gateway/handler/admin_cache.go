@@ -3,18 +3,21 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	exactcache "github.com/llm-router/gateway/internal/cache/exact"
+	pgstore "github.com/llm-router/gateway/internal/store/postgres"
 )
 
 // AdminCacheHandler handles /admin/cache/* endpoints.
 type AdminCacheHandler struct {
-	cache *exactcache.Cache
+	cache    *exactcache.Cache
+	logStore *pgstore.LogStore
 }
 
 // NewAdminCacheHandler creates a handler for cache administration.
-func NewAdminCacheHandler(cache *exactcache.Cache) *AdminCacheHandler {
-	return &AdminCacheHandler{cache: cache}
+func NewAdminCacheHandler(cache *exactcache.Cache, logStore *pgstore.LogStore) *AdminCacheHandler {
+	return &AdminCacheHandler{cache: cache, logStore: logStore}
 }
 
 // Delete handles DELETE /admin/cache/exact — flush the entire exact cache,
@@ -59,4 +62,28 @@ func (h *AdminCacheHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, entry)
+}
+
+// Stats handles GET /admin/cache/stats — return today's cache hit/miss counts.
+func (h *AdminCacheHandler) Stats(w http.ResponseWriter, r *http.Request) {
+	now := time.Now().UTC()
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+	total, hits, err := h.logStore.CacheStats(r.Context(), dayStart, now)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to query cache stats: %v", err), "api_error", "")
+		return
+	}
+
+	var hitRate *float64
+	if total > 0 {
+		rate := float64(hits) / float64(total) * 100
+		hitRate = &rate
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"total":    total,
+		"hits":     hits,
+		"hit_rate": hitRate,
+	})
 }

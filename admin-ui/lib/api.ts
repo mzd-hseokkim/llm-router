@@ -864,6 +864,18 @@ export const circuitBreakers = {
     ),
 };
 
+// --- Cache ---
+
+export interface CacheStats {
+  total: number;
+  hits: number;
+  hit_rate: number | null;
+}
+
+export const cache = {
+  stats: () => apiFetch<CacheStats>("/cache/stats"),
+};
+
 // --- Rate Limits ---
 
 export interface RateLimitConfig {

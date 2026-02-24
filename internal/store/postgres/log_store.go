@@ -207,6 +207,20 @@ func (s *LogStore) GetByRequestID(ctx context.Context, requestID string) (*telem
 // ErrLogNotFound is returned when a log entry is not found.
 var ErrLogNotFound = errors.New("log entry not found")
 
+// CacheStats returns the total number of cache lookups and cache hits for the
+// given time range, queried directly from request_logs.
+func (s *LogStore) CacheStats(ctx context.Context, from, to time.Time) (total, hits int64, err error) {
+	const q = `
+		SELECT
+			COUNT(*) AS total,
+			COUNT(*) FILTER (WHERE cache_hit = true) AS hits
+		FROM request_logs
+		WHERE timestamp >= $1 AND timestamp <= $2`
+	row := s.pool.QueryRow(ctx, q, from, to)
+	err = row.Scan(&total, &hits)
+	return
+}
+
 // LogFilter specifies optional filter parameters for listing log entries.
 type LogFilter struct {
 	VirtualKeyID *uuid.UUID

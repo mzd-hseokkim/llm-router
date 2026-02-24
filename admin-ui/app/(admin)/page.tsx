@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { usage, keys, providerKeys } from "@/lib/api";
+import { usage, keys, providerKeys, circuitBreakers, alerts, cache } from "@/lib/api";
 import StatCard from "@/components/StatCard";
 import {
   BarChart,
@@ -45,6 +45,32 @@ export default function DashboardPage() {
     refetchInterval: 30_000,
   });
 
+  const { data: cbs = [] } = useQuery({
+    queryKey: ["circuit-breakers"],
+    queryFn: () => circuitBreakers.list(),
+    refetchInterval: 30_000,
+  });
+
+  const { data: alertConfig } = useQuery({
+    queryKey: ["alert-config"],
+    queryFn: () => alerts.getConfig(),
+    retry: false,
+  });
+
+  const { data: cacheStats } = useQuery({
+    queryKey: ["cache-stats"],
+    queryFn: () => cache.stats(),
+    refetchInterval: 30_000,
+  });
+
+  const budgetThreshold = alertConfig?.conditions?.budget_threshold_pct ?? 80;
+  const budgetWarnings = pKeys.filter(
+    (p) =>
+      p.monthly_budget_usd != null &&
+      p.monthly_budget_usd > 0 &&
+      (p.current_month_spend / p.monthly_budget_usd) * 100 >= budgetThreshold
+  );
+
   const totalCost = spenders.reduce((s, sp) => s + sp.cost_usd, 0);
   const totalRequests = spenders.reduce((s, sp) => s + sp.request_count, 0);
   const activeKeys = allKeys.filter((k) => k.is_active).length;
@@ -64,6 +90,25 @@ export default function DashboardPage() {
         <p className="text-sm text-slate-500 mt-1">Monthly overview — auto-refreshes every 30s</p>
       </div>
 
+      {/* Budget warning banner */}
+      {budgetWarnings.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-4">
+          <p className="text-sm font-semibold text-amber-800 mb-2">
+            ⚠️ Budget Alert — {budgetWarnings.length} provider key{budgetWarnings.length > 1 ? "s" : ""} near limit
+          </p>
+          <ul className="space-y-1">
+            {budgetWarnings.map((p) => (
+              <li key={p.id} className="text-sm text-amber-700">
+                <span className="font-medium">{p.key_alias}</span>
+                {" — "}
+                {((p.current_month_spend / p.monthly_budget_usd!) * 100).toFixed(1)}% used
+                {" "}(${p.current_month_spend.toFixed(2)} / ${p.monthly_budget_usd!.toFixed(2)})
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* Stat cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
@@ -74,6 +119,17 @@ export default function DashboardPage() {
         <StatCard title="Total Requests" value={fmt(totalRequests)} />
         <StatCard title="Active Keys" value={activeKeys} sub={`of ${allKeys.length} total`} />
         <StatCard title="Active Provider Keys" value={activeProviders} sub={`of ${pKeys.length} total`} />
+        <StatCard
+          title="Today's Cache Hit Rate"
+          value={
+            cacheStats == null
+              ? "…"
+              : cacheStats.hit_rate == null
+              ? "N/A"
+              : `${cacheStats.hit_rate.toFixed(1)}%`
+          }
+          sub={cacheStats != null ? `${cacheStats.hits} / ${cacheStats.total} requests` : undefined}
+        />
       </div>
 
       {/* Charts */}
@@ -124,6 +180,35 @@ export default function DashboardPage() {
             </ResponsiveContainer>
           )}
         </div>
+      </div>
+      {/* Circuit Breaker status */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+        <h2 className="text-sm font-semibold text-slate-700 mb-4">Circuit Breaker Status</h2>
+        {cbs.length === 0 ? (
+          <p className="text-sm text-slate-400 text-center py-4">No circuit breakers tracked</p>
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            {cbs.map((cb) => {
+              const stateStyles: Record<string, string> = {
+                closed: "bg-emerald-100 text-emerald-800",
+                open: "bg-red-100 text-red-800",
+                half_open: "bg-amber-100 text-amber-800",
+              };
+              const style = stateStyles[cb.state] ?? "bg-slate-100 text-slate-700";
+              return (
+                <div key={cb.provider} className="flex items-center gap-2">
+                  <span className="text-sm text-slate-600 font-medium capitalize">{cb.provider}</span>
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${style}`}>
+                    {cb.state.replace("_", " ").toUpperCase()}
+                  </span>
+                  {cb.failure_count > 0 && (
+                    <span className="text-xs text-slate-400">{cb.failure_count} fail{cb.failure_count > 1 ? "s" : ""}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
