@@ -406,11 +406,13 @@ export const guardrails = {
 // --- Budgets ---
 
 export interface Budget {
+  id: string;
   entity_type: string;
   entity_id: string;
   period: string;
-  soft_limit_usd: number;
-  hard_limit_usd: number;
+  soft_limit_usd: number | null;
+  hard_limit_usd: number | null;
+  current_spend: number;
   period_start: string;
   period_end: string;
 }
