@@ -107,6 +107,52 @@ func (s *PromptStore) ListPrompts(ctx context.Context, teamID *string) ([]*Promp
 	return result, rows.Err()
 }
 
+// ListPromptsPage returns a paginated slice of prompts (optionally filtered by teamID).
+func (s *PromptStore) ListPromptsPage(ctx context.Context, teamID *string, limit, offset int) ([]*PromptRow, error) {
+	query := `SELECT id, slug, name, COALESCE(description,''), visibility,
+		       team_id::TEXT, created_by::TEXT, created_at FROM prompts`
+	args := []any{}
+	if teamID != nil {
+		query += " WHERE team_id = $1"
+		args = append(args, *teamID)
+	}
+	query += " ORDER BY created_at DESC"
+	args = append(args, limit, offset)
+	limitPos := len(args) - 1
+	offsetPos := len(args)
+	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", limitPos, offsetPos)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("prompt_store list_page: %w", err)
+	}
+	defer rows.Close()
+
+	var result []*PromptRow
+	for rows.Next() {
+		r := &PromptRow{}
+		if err := rows.Scan(&r.ID, &r.Slug, &r.Name, &r.Description, &r.Visibility,
+			&r.TeamID, &r.CreatedBy, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// CountPrompts returns the total number of prompts (optionally filtered by teamID).
+func (s *PromptStore) CountPrompts(ctx context.Context, teamID *string) (int64, error) {
+	query := "SELECT COUNT(*) FROM prompts"
+	args := []any{}
+	if teamID != nil {
+		query += " WHERE team_id = $1"
+		args = append(args, *teamID)
+	}
+	var total int64
+	err := s.pool.QueryRow(ctx, query, args...).Scan(&total)
+	return total, err
+}
+
 // CreateVersion inserts a new version for the given prompt.
 func (s *PromptStore) CreateVersion(ctx context.Context, promptID, version, status, template, model, changelog string, variables, parameters json.RawMessage, createdBy *string) (*PromptVersionRow, error) {
 	row := &PromptVersionRow{}

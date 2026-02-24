@@ -117,6 +117,42 @@ func (s *VirtualKeyStore) List(ctx context.Context) ([]*auth.VirtualKey, error) 
 	return keys, rows.Err()
 }
 
+// ListPage returns a paginated slice of virtual keys ordered by creation time (newest first).
+func (s *VirtualKeyStore) ListPage(ctx context.Context, limit, offset int) ([]*auth.VirtualKey, error) {
+	const q = `
+		SELECT id, key_hash, key_prefix, name,
+		       user_id, team_id, org_id,
+		       expires_at, budget_usd, rpm_limit, tpm_limit,
+		       allowed_models, blocked_models, metadata,
+		       is_active, created_at, updated_at, last_used_at
+		FROM virtual_keys
+		ORDER BY created_at DESC
+		LIMIT $1 OFFSET $2`
+
+	rows, err := s.pool.Query(ctx, q, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list virtual keys page: %w", err)
+	}
+	defer rows.Close()
+
+	var keys []*auth.VirtualKey
+	for rows.Next() {
+		key, err := scanVirtualKey(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan virtual key: %w", err)
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
+}
+
+// CountKeys returns the total number of virtual keys.
+func (s *VirtualKeyStore) CountKeys(ctx context.Context) (int64, error) {
+	var total int64
+	err := s.pool.QueryRow(ctx, "SELECT COUNT(*) FROM virtual_keys").Scan(&total)
+	return total, err
+}
+
 // Update replaces all mutable fields of an existing key.
 func (s *VirtualKeyStore) Update(ctx context.Context, key *auth.VirtualKey) error {
 	const q = `

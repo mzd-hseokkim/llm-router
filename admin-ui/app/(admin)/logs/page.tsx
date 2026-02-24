@@ -17,12 +17,17 @@ function StatusBadge({ code }: { code: number }) {
 export default function LogsPage() {
   const [selected, setSelected] = useState<LogEntry | null>(null);
   const [limit, setLimit] = useState(50);
+  const [page, setPage] = useState(1);
 
-  const { data: logList = [], isLoading, refetch } = useQuery({
-    queryKey: ["logs", limit],
-    queryFn: () => logs.list({ limit }),
+  const { data, isLoading, refetch } = useQuery({
+    queryKey: ["logs", limit, page],
+    queryFn: () => logs.list({ limit, page }),
     refetchInterval: 15_000,
   });
+
+  const logList = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
 
   return (
     <div className="space-y-6">
@@ -34,7 +39,7 @@ export default function LogsPage() {
         <div className="flex items-center gap-3">
           <select
             value={limit}
-            onChange={(e) => setLimit(Number(e.target.value))}
+            onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }}
             className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm"
           >
             {[25, 50, 100, 200].map((n) => (
@@ -70,7 +75,7 @@ export default function LogsPage() {
                   Loading…
                 </td>
               </tr>
-            ) : logList.length === 0 ? (
+            ) : (logList as LogEntry[]).length === 0 ? (
               <tr>
                 <td colSpan={7} className="text-center py-8 text-slate-400 text-sm">
                   No logs yet.
@@ -103,6 +108,18 @@ export default function LogsPage() {
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Pagination footer */}
+      <div className="flex items-center justify-between text-sm text-slate-500">
+        <span>{total.toLocaleString()} total logs</span>
+        <div className="flex items-center gap-1">
+          <button onClick={() => setPage(1)} disabled={page === 1} className="px-2 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" aria-label="First page">«</button>
+          <button onClick={() => setPage(page - 1)} disabled={page === 1} className="px-2 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Previous page">‹</button>
+          <span className="px-3 py-1.5">{page} / {totalPages}</span>
+          <button onClick={() => setPage(page + 1)} disabled={page >= totalPages} className="px-2 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Next page">›</button>
+          <button onClick={() => setPage(totalPages)} disabled={page >= totalPages} className="px-2 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Last page">»</button>
+        </div>
       </div>
 
       {/* Log detail drawer */}

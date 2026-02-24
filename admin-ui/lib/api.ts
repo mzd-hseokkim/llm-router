@@ -204,7 +204,13 @@ export interface User {
 // --- Virtual Keys ---
 
 export const keys = {
-  list: () => apiFetch<{ data: VirtualKey[] }>("/keys").then((r) => r.data),
+  list: (params?: { page?: number; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.page) q.set("page", String(params.page));
+    if (params?.limit) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return apiFetch<{ data: VirtualKey[]; total?: number; page?: number; limit?: number }>(`/keys${qs ? `?${qs}` : ""}`);
+  },
   get: (id: string) => apiFetch<VirtualKey>(`/keys/${id}`),
   create: (payload: CreateKeyPayload) =>
     apiFetch<{ key: string } & VirtualKey>("/keys", {
@@ -303,13 +309,14 @@ export const providerKeys = {
 // --- Logs ---
 
 export const logs = {
-  list: (params?: { key_id?: string; limit?: number; from?: string; to?: string }) => {
+  list: (params?: { key_id?: string; limit?: number; page?: number; from?: string; to?: string }) => {
     const q = new URLSearchParams();
     if (params?.key_id) q.set("key_id", params.key_id);
     if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.page) q.set("page", String(params.page));
     if (params?.from) q.set("from", params.from);
     if (params?.to) q.set("to", params.to);
-    return apiFetch<{ data: LogEntry[] }>(`/logs?${q}`).then((r) => r.data);
+    return apiFetch<{ data: LogEntry[]; total: number; page: number; limit: number }>(`/logs?${q}`);
   },
   get: (requestId: string) => apiFetch<LogEntry>(`/logs/${requestId}`),
 };
@@ -518,10 +525,14 @@ export interface CreatePromptPayload {
 }
 
 export const prompts = {
-  list: (teamId?: string) =>
-    apiFetch<{ data: Prompt[] }>(`/prompts${teamId ? `?team_id=${teamId}` : ""}`).then(
-      (r) => r.data ?? []
-    ),
+  list: (params?: { teamId?: string; page?: number; limit?: number }) => {
+    const q = new URLSearchParams();
+    if (params?.teamId) q.set("team_id", params.teamId);
+    if (params?.page) q.set("page", String(params.page));
+    if (params?.limit) q.set("limit", String(params.limit));
+    const qs = q.toString();
+    return apiFetch<{ data: Prompt[]; total?: number; page?: number; limit?: number }>(`/prompts${qs ? `?${qs}` : ""}`);
+  },
   get: (slug: string) =>
     apiFetch<{ prompt: Prompt; version: PromptVersion }>(`/prompts/${slug}`),
   create: (payload: CreatePromptPayload) =>

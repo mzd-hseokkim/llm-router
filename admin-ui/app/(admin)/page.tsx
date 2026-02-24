@@ -35,7 +35,7 @@ export default function DashboardPage() {
 
   const { data: allKeys = [] } = useQuery({
     queryKey: ["keys"],
-    queryFn: () => keys.list(),
+    queryFn: () => keys.list().then((r) => r.data ?? []),
     refetchInterval: 30_000,
   });
 

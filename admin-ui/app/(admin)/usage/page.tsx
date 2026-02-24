@@ -25,7 +25,7 @@ export default function UsagePage() {
 
   const { data: keyList = [] } = useQuery({
     queryKey: ["keys"],
-    queryFn: () => keys.list(),
+    queryFn: () => keys.list().then((r) => r.data ?? []),
   });
 
   const { data: summary, isLoading: summaryLoading } = useQuery({

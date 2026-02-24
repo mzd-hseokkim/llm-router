@@ -16,6 +16,7 @@ import (
 // logQuerier is the minimal interface needed by AdminLogsHandler.
 type logQuerier interface {
 	List(ctx context.Context, f postgres.LogFilter) ([]*telemetry.LogEntry, error)
+	Count(ctx context.Context, f postgres.LogFilter) (int64, error)
 	GetByRequestID(ctx context.Context, requestID string) (*telemetry.LogEntry, error)
 }
 
@@ -56,7 +57,8 @@ func (h *AdminLogsHandler) Get(w http.ResponseWriter, r *http.Request) {
 //	from    — start time (RFC3339), default: 7 days ago
 //	to      — end time   (RFC3339), default: now
 //	limit   — max entries (1–1000), default: 100
-//	offset  — pagination offset, default: 0
+//	page    — 1-based page number (takes precedence over offset), default: 1
+//	offset  — pagination offset (ignored when page is set), default: 0
 func (h *AdminLogsHandler) List(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 
@@ -98,7 +100,20 @@ func (h *AdminLogsHandler) List(w http.ResponseWriter, r *http.Request) {
 		f.Limit = n
 	}
 
-	if s := q.Get("offset"); s != "" {
+	page := 1
+	if s := q.Get("page"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 1 {
+			writeError(w, http.StatusBadRequest, "page must be >= 1", "invalid_request_error", "")
+			return
+		}
+		page = n
+		limit := f.Limit
+		if limit <= 0 {
+			limit = 100
+		}
+		f.Offset = (page - 1) * limit
+	} else if s := q.Get("offset"); s != "" {
 		n, err := strconv.Atoi(s)
 		if err != nil || n < 0 {
 			writeError(w, http.StatusBadRequest, "offset must be >= 0", "invalid_request_error", "")
@@ -107,14 +122,26 @@ func (h *AdminLogsHandler) List(w http.ResponseWriter, r *http.Request) {
 		f.Offset = n
 	}
 
+	total, err := h.store.Count(r.Context(), f)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to count logs", "api_error", "")
+		return
+	}
+
 	entries, err := h.store.List(r.Context(), f)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to query logs", "api_error", "")
 		return
 	}
 
+	limit := f.Limit
+	if limit <= 0 {
+		limit = 100
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"object": "list",
-		"data":   entries,
+		"data":  entries,
+		"total": total,
+		"page":  page,
+		"limit": limit,
 	})
 }

@@ -146,13 +146,19 @@ function NewKeyDisplay({ rawKey, onClose }: { rawKey: string; onClose: () => voi
 export default function KeysPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [newKey, setNewKey] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(50);
   const qc = useQueryClient();
 
-  const { data: keyList = [], isLoading } = useQuery({
-    queryKey: ["keys"],
-    queryFn: () => keys.list(),
+  const { data, isLoading } = useQuery({
+    queryKey: ["keys", page, limit],
+    queryFn: () => keys.list({ page, limit }),
     refetchInterval: 30_000,
   });
+
+  const keyList = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
 
   const deactivateMutation = useMutation({
     mutationFn: (id: string) => keys.deactivate(id),
@@ -167,12 +173,17 @@ export default function KeysPage() {
     },
   });
 
+  function handleLimitChange(newLimit: number) {
+    setLimit(newLimit);
+    setPage(1);
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Virtual Keys</h1>
-          <p className="text-sm text-slate-500 mt-1">{keyList.length} keys total</p>
+          <p className="text-sm text-slate-500 mt-1">{total.toLocaleString()} keys total</p>
         </div>
         <button
           onClick={() => setShowCreate(true)}
@@ -239,6 +250,34 @@ export default function KeysPage() {
           {keyList.length === 0 && (
             <p className="text-center text-slate-400 py-8 text-sm">No keys yet.</p>
           )}
+        </div>
+      )}
+
+      {/* Pagination footer */}
+      {total > 0 && (
+        <div className="flex items-center justify-between text-sm text-slate-500">
+          <span>{total.toLocaleString()} total keys</span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1">
+              <button onClick={() => setPage(1)} disabled={page === 1} className="px-2 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" aria-label="First page">«</button>
+              <button onClick={() => setPage(page - 1)} disabled={page === 1} className="px-2 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Previous page">‹</button>
+              <span className="px-3 py-1.5">{page} / {totalPages}</span>
+              <button onClick={() => setPage(page + 1)} disabled={page >= totalPages} className="px-2 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Next page">›</button>
+              <button onClick={() => setPage(totalPages)} disabled={page >= totalPages} className="px-2 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Last page">»</button>
+            </div>
+            <div className="flex items-center gap-2">
+              <span>Per page:</span>
+              <select
+                value={limit}
+                onChange={(e) => handleLimitChange(Number(e.target.value))}
+                className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm"
+              >
+                {[25, 50, 100, 200].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
       )}
 

@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/llm-router/gateway/internal/prompt"
@@ -20,18 +21,71 @@ func NewAdminPromptsHandler(svc *prompt.Service, store *pgstore.PromptStore) *Ad
 	return &AdminPromptsHandler{svc: svc, store: store}
 }
 
-// List handles GET /admin/prompts.
+// List handles GET /admin/prompts with optional pagination:
+//
+//	team_id — filter by team UUID (optional)
+//	page    — 1-based page number, default: 1 (if omitted without limit, returns all)
+//	limit   — page size (1–1000), default: 100 when page is provided
 func (h *AdminPromptsHandler) List(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
 	var teamID *string
-	if t := r.URL.Query().Get("team_id"); t != "" {
+	if t := q.Get("team_id"); t != "" {
 		teamID = &t
 	}
-	rows, err := h.store.ListPrompts(r.Context(), teamID)
+
+	pageStr := q.Get("page")
+	limitStr := q.Get("limit")
+
+	// No pagination params: return all (backward compat).
+	if pageStr == "" && limitStr == "" {
+		rows, err := h.store.ListPrompts(r.Context(), teamID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error(), "api_error", "")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": rows})
+		return
+	}
+
+	limit := 100
+	if limitStr != "" {
+		n, err := strconv.Atoi(limitStr)
+		if err != nil || n < 1 || n > 1000 {
+			writeError(w, http.StatusBadRequest, "limit must be between 1 and 1000", "invalid_request_error", "")
+			return
+		}
+		limit = n
+	}
+
+	page := 1
+	if pageStr != "" {
+		n, err := strconv.Atoi(pageStr)
+		if err != nil || n < 1 {
+			writeError(w, http.StatusBadRequest, "page must be >= 1", "invalid_request_error", "")
+			return
+		}
+		page = n
+	}
+	offset := (page - 1) * limit
+
+	total, err := h.store.CountPrompts(r.Context(), teamID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error(), "api_error", "")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": rows})
+
+	rows, err := h.store.ListPromptsPage(r.Context(), teamID, limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "api_error", "")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data":  rows,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
 }
 
 // Create handles POST /admin/prompts.

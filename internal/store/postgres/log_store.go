@@ -280,6 +280,29 @@ func (s *LogStore) List(ctx context.Context, f LogFilter) ([]*telemetry.LogEntry
 	return entries, rows.Err()
 }
 
+// Count returns the total number of log entries matching the filter (used for pagination).
+func (s *LogStore) Count(ctx context.Context, f LogFilter) (int64, error) {
+	if f.From.IsZero() {
+		f.From = time.Now().AddDate(0, 0, -7)
+	}
+	if f.To.IsZero() {
+		f.To = time.Now()
+	}
+
+	args := []any{f.From, f.To}
+	where := "WHERE timestamp >= $1 AND timestamp <= $2"
+
+	if f.VirtualKeyID != nil {
+		args = append(args, pgtype.UUID{Bytes: *f.VirtualKeyID, Valid: true})
+		where += fmt.Sprintf(" AND virtual_key_id = $%d", len(args))
+	}
+
+	q := fmt.Sprintf("SELECT COUNT(*) FROM request_logs %s", where)
+	var total int64
+	err := s.pool.QueryRow(ctx, q, args...).Scan(&total)
+	return total, err
+}
+
 func scanLogEntry(s scanner) (*telemetry.LogEntry, error) {
 	var (
 		e              telemetry.LogEntry

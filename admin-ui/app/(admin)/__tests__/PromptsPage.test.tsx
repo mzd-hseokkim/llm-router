@@ -50,13 +50,13 @@ const sampleVersion = {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(prompts.list).mockResolvedValue([])
+  vi.mocked(prompts.list).mockResolvedValue({ data: [] })
   vi.mocked(prompts.versions.list).mockResolvedValue([])
 })
 
 describe('PromptsPage', () => {
   it('TC-1: renders prompt list', async () => {
-    vi.mocked(prompts.list).mockResolvedValue([samplePrompt])
+    vi.mocked(prompts.list).mockResolvedValue({ data: [samplePrompt] })
     render(withQueryClient(<PromptsPage />))
     // findByText retries until element appears (handles async React Query)
     expect(await screen.findByText('Welcome')).toBeInTheDocument()
@@ -149,7 +149,7 @@ describe('PromptsPage', () => {
   })
 
   it('TC-8: shows version history panel with version list', async () => {
-    vi.mocked(prompts.list).mockResolvedValue([samplePrompt])
+    vi.mocked(prompts.list).mockResolvedValue({ data: [samplePrompt] })
     vi.mocked(prompts.versions.list).mockResolvedValue([sampleVersion])
     render(withQueryClient(<PromptsPage />))
     // Wait for prompt row to appear
@@ -161,7 +161,7 @@ describe('PromptsPage', () => {
   })
 
   it('TC-9: closes version panel on Close button click', async () => {
-    vi.mocked(prompts.list).mockResolvedValue([samplePrompt])
+    vi.mocked(prompts.list).mockResolvedValue({ data: [samplePrompt] })
     vi.mocked(prompts.versions.list).mockResolvedValue([sampleVersion])
     render(withQueryClient(<PromptsPage />))
     await screen.findByText('Welcome')
@@ -172,7 +172,7 @@ describe('PromptsPage', () => {
   })
 
   it('TC-10: Rollback button is disabled for active version', async () => {
-    vi.mocked(prompts.list).mockResolvedValue([samplePrompt])
+    vi.mocked(prompts.list).mockResolvedValue({ data: [samplePrompt] })
     vi.mocked(prompts.versions.list).mockResolvedValue([sampleVersion])
     render(withQueryClient(<PromptsPage />))
     await screen.findByText('Welcome')
@@ -188,7 +188,7 @@ describe('PromptsPage', () => {
       version: '0.9.0',
       is_active: false,
     }
-    vi.mocked(prompts.list).mockResolvedValue([samplePrompt])
+    vi.mocked(prompts.list).mockResolvedValue({ data: [samplePrompt] })
     vi.mocked(prompts.versions.list).mockResolvedValue([
       sampleVersion,
       inactiveVersion,
@@ -216,7 +216,7 @@ describe('PromptsPage', () => {
       version: '2.0.0',
       is_active: false,
     }
-    vi.mocked(prompts.list).mockResolvedValue([samplePrompt])
+    vi.mocked(prompts.list).mockResolvedValue({ data: [samplePrompt] })
     vi.mocked(prompts.versions.list).mockResolvedValue([sampleVersion, v2])
     render(withQueryClient(<PromptsPage />))
     await screen.findByText('Welcome')
@@ -232,7 +232,7 @@ describe('PromptsPage', () => {
       version: '2.0.0',
       is_active: false,
     }
-    vi.mocked(prompts.list).mockResolvedValue([samplePrompt])
+    vi.mocked(prompts.list).mockResolvedValue({ data: [samplePrompt] })
     vi.mocked(prompts.versions.list).mockResolvedValue([sampleVersion, v2])
     vi.mocked(prompts.diff).mockResolvedValue({
       from: { version: '1.0.0', template: 'line1\nline2' },

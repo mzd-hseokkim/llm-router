@@ -419,7 +419,7 @@ func buildKeyManager(pool *pgxpool.Pool, cfg *config.Config, logger *slog.Logger
 // registerAdminRoutes mounts all /admin/* endpoints.
 func registerAdminRoutes(
 	r chi.Router,
-	store auth.Store,
+	store *pgstore.VirtualKeyStore,
 	cache auth.Cache,
 	km *provider.KeyManager,
 	cipher *crypto.Cipher,

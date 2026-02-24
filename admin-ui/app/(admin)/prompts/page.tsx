@@ -621,12 +621,18 @@ export default function PromptsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editPrompt, setEditPrompt] = useState<Prompt | null>(null);
   const [versionPrompt, setVersionPrompt] = useState<Prompt | null>(null);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(50);
 
-  const { data: promptList = [], isLoading } = useQuery({
-    queryKey: ["prompts"],
-    queryFn: () => prompts.list(),
+  const { data, isLoading } = useQuery({
+    queryKey: ["prompts", page, limit],
+    queryFn: () => prompts.list({ page, limit }),
     refetchInterval: 30_000,
   });
+
+  const promptList = data?.data ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / limit));
 
   function handleVersionToggle(p: Prompt) {
     setVersionPrompt((prev) => (prev?.id === p.id ? null : p));
@@ -638,7 +644,7 @@ export default function PromptsPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Prompts</h1>
           <p className="text-sm text-slate-500 mt-1">
-            {promptList.length} prompts total
+            {total.toLocaleString()} prompts total
           </p>
         </div>
         <button
@@ -720,6 +726,34 @@ export default function PromptsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Pagination footer */}
+      {total > 0 && (
+        <div className="flex items-center justify-between text-sm text-slate-500">
+          <span>{total.toLocaleString()} total prompts</span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1">
+              <button onClick={() => setPage(1)} disabled={page === 1} className="px-2 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" aria-label="First page">«</button>
+              <button onClick={() => setPage(page - 1)} disabled={page === 1} className="px-2 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Previous page">‹</button>
+              <span className="px-3 py-1.5">{page} / {totalPages}</span>
+              <button onClick={() => setPage(page + 1)} disabled={page >= totalPages} className="px-2 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Next page">›</button>
+              <button onClick={() => setPage(totalPages)} disabled={page >= totalPages} className="px-2 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Last page">»</button>
+            </div>
+            <div className="flex items-center gap-2">
+              <span>Per page:</span>
+              <select
+                value={limit}
+                onChange={(e) => { setLimit(Number(e.target.value)); setPage(1); }}
+                className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm"
+              >
+                {[25, 50, 100, 200].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+          </div>
         </div>
       )}
 

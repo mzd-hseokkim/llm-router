@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -12,15 +14,22 @@ import (
 	"github.com/llm-router/gateway/internal/auth"
 )
 
+// keyStore extends auth.Store with pagination methods.
+type keyStore interface {
+	auth.Store
+	ListPage(ctx context.Context, limit, offset int) ([]*auth.VirtualKey, error)
+	CountKeys(ctx context.Context) (int64, error)
+}
+
 // AdminKeysHandler handles CRUD for virtual keys via /admin/keys.
 type AdminKeysHandler struct {
-	store  auth.Store
+	store  keyStore
 	cache  auth.Cache
 	logger *slog.Logger
 }
 
 // NewAdminKeysHandler creates a new handler.
-func NewAdminKeysHandler(store auth.Store, cache auth.Cache, logger *slog.Logger) *AdminKeysHandler {
+func NewAdminKeysHandler(store keyStore, cache auth.Cache, logger *slog.Logger) *AdminKeysHandler {
 	return &AdminKeysHandler{store: store, cache: cache, logger: logger}
 }
 
@@ -125,9 +134,60 @@ func (h *AdminKeysHandler) Create(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// List handles GET /admin/keys.
+// List handles GET /admin/keys with optional pagination:
+//
+//	page  — 1-based page number, default: 1 (if omitted, returns all keys for backward compat)
+//	limit — page size (1–1000), default: 100 when page is provided
 func (h *AdminKeysHandler) List(w http.ResponseWriter, r *http.Request) {
-	keys, err := h.store.List(r.Context())
+	q := r.URL.Query()
+	pageStr := q.Get("page")
+	limitStr := q.Get("limit")
+
+	// If neither page nor limit is provided, return all keys (backward compat).
+	if pageStr == "" && limitStr == "" {
+		keys, err := h.store.List(r.Context())
+		if err != nil {
+			h.logger.Error("failed to list virtual keys", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to list keys", "internal_error", "")
+			return
+		}
+		resp := make([]keyResponse, 0, len(keys))
+		for _, k := range keys {
+			resp = append(resp, toKeyResponse(k))
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"data": resp})
+		return
+	}
+
+	limit := 100
+	if limitStr != "" {
+		n, err := strconv.Atoi(limitStr)
+		if err != nil || n < 1 || n > 1000 {
+			writeError(w, http.StatusBadRequest, "limit must be between 1 and 1000", "invalid_request_error", "")
+			return
+		}
+		limit = n
+	}
+
+	page := 1
+	if pageStr != "" {
+		n, err := strconv.Atoi(pageStr)
+		if err != nil || n < 1 {
+			writeError(w, http.StatusBadRequest, "page must be >= 1", "invalid_request_error", "")
+			return
+		}
+		page = n
+	}
+	offset := (page - 1) * limit
+
+	total, err := h.store.CountKeys(r.Context())
+	if err != nil {
+		h.logger.Error("failed to count virtual keys", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to count keys", "internal_error", "")
+		return
+	}
+
+	keys, err := h.store.ListPage(r.Context(), limit, offset)
 	if err != nil {
 		h.logger.Error("failed to list virtual keys", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to list keys", "internal_error", "")
@@ -138,7 +198,12 @@ func (h *AdminKeysHandler) List(w http.ResponseWriter, r *http.Request) {
 	for _, k := range keys {
 		resp = append(resp, toKeyResponse(k))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": resp})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data":  resp,
+		"total": total,
+		"page":  page,
+		"limit": limit,
+	})
 }
 
 // Get handles GET /admin/keys/{id}.
