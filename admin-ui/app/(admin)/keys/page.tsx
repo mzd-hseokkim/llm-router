@@ -2,7 +2,22 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { keys, CreateKeyPayload, VirtualKey } from "@/lib/api";
+import { keys, CreateKeyPayload, VirtualKey, circuitBreakers, CircuitBreaker } from "@/lib/api";
+
+const stateStyles: Record<string, string> = {
+  closed: "bg-emerald-100 text-emerald-800",
+  open: "bg-red-100 text-red-800",
+  half_open: "bg-amber-100 text-amber-800",
+};
+
+function CircuitBreakerStateBadge({ state }: { state: string }) {
+  const style = stateStyles[state] ?? "bg-slate-100 text-slate-500";
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${style}`}>
+      {state.replace("_", " ").toUpperCase()}
+    </span>
+  );
+}
 
 function Badge({ active }: { active: boolean }) {
   return (
@@ -160,6 +175,17 @@ export default function KeysPage() {
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / limit));
 
+  const { data: cbData, isLoading: cbLoading, isError: cbError } = useQuery({
+    queryKey: ["circuit-breakers"],
+    queryFn: circuitBreakers.list,
+    refetchInterval: 30_000,
+  });
+
+  const cbResetMutation = useMutation({
+    mutationFn: (provider: string) => circuitBreakers.reset(provider),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["circuit-breakers"] }),
+  });
+
   const deactivateMutation = useMutation({
     mutationFn: (id: string) => keys.deactivate(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["keys"] }),
@@ -280,6 +306,44 @@ export default function KeysPage() {
           </div>
         </div>
       )}
+
+      {/* Circuit Breaker Section */}
+      <div className="space-y-3">
+        <h2 className="text-lg font-semibold text-slate-900">Circuit Breakers</h2>
+        {cbLoading ? (
+          <p className="text-sm text-slate-400">Loading…</p>
+        ) : cbError ? (
+          <p className="text-sm text-red-500">Failed to load circuit breakers</p>
+        ) : !cbData || cbData.length === 0 ? (
+          <p className="text-sm text-slate-400">No circuit breakers tracked</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {cbData.map((cb: CircuitBreaker) => (
+              <div key={cb.provider} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-slate-900 capitalize">{cb.provider}</span>
+                  <CircuitBreakerStateBadge state={cb.state} />
+                </div>
+                <div className="text-xs text-slate-500 space-y-1">
+                  <div>Failures: {cb.failure_count}</div>
+                  <div>Last failure: {cb.last_failure ? new Date(cb.last_failure).toLocaleString() : "—"}</div>
+                  <div>Reset time: {cb.reset_time ? new Date(cb.reset_time).toLocaleString() : "—"}</div>
+                </div>
+                {cbResetMutation.isError && cbResetMutation.variables === cb.provider && (
+                  <p className="text-xs text-red-500">Reset failed. Try again.</p>
+                )}
+                <button
+                  onClick={() => cbResetMutation.mutate(cb.provider)}
+                  disabled={cb.state === "closed" || cbResetMutation.isPending}
+                  className="w-full text-xs border border-slate-300 py-1.5 rounded-lg hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Reset
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {showCreate && (
         <CreateKeyDialog
