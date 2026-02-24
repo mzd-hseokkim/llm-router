@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -136,19 +135,29 @@ func (m *VirtualKeyMiddleware) runLastUsedUpdater() {
 	}
 }
 
-// AdminAuth returns middleware that requires the static master key.
-func AdminAuth(masterKey string) func(http.Handler) http.Handler {
-	masterKeyBytes := []byte(masterKey)
+// adminClaimsKey is the context key for AdminClaims.
+type adminClaimsKey struct{}
+
+// AdminAuth returns middleware that validates admin JWTs.
+func AdminAuth(jwtSvc *JWTService) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := bearerToken(r)
-			if token == "" || subtle.ConstantTimeCompare([]byte(token), masterKeyBytes) != 1 {
-				writeAuthError(w, "invalid master key")
+			claims, err := jwtSvc.ValidateToken(token)
+			if err != nil {
+				writeAuthError(w, "invalid or expired token")
 				return
 			}
-			next.ServeHTTP(w, r)
+			ctx := context.WithValue(r.Context(), adminClaimsKey{}, claims)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// GetAdminClaims retrieves admin JWT claims from the request context.
+func GetAdminClaims(ctx context.Context) *AdminClaims {
+	v, _ := ctx.Value(adminClaimsKey{}).(*AdminClaims)
+	return v
 }
 
 func bearerToken(r *http.Request) string {

@@ -53,12 +53,17 @@ export default function Sidebar() {
       </nav>
       <div className="px-4 py-3 border-t border-slate-700 flex items-center justify-between">
         <span className="text-xs text-slate-500">v1.0.0</span>
-        <button
-          onClick={handleLogout}
-          className="text-xs text-slate-400 hover:text-slate-100 transition-colors"
-        >
-          Sign out
-        </button>
+        <div className="flex items-center gap-3">
+          <Link href="/change-password" className="text-xs text-slate-400 hover:text-slate-100 transition-colors">
+            Password
+          </Link>
+          <button
+            onClick={handleLogout}
+            className="text-xs text-slate-400 hover:text-slate-100 transition-colors"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
     </aside>
   );

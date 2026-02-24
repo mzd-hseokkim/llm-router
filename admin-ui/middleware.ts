@@ -33,6 +33,6 @@ export function middleware(request: NextRequest) {
 export const config = {
   // Match all routes except /login, /api/auth/*, and Next.js internals.
   matcher: [
-    "/((?!login|api/auth|_next/static|_next/image|favicon.ico).*)",
+    "/((?!login|change-password|api/auth|_next/static|_next/image|favicon.ico).*)",
   ],
 };

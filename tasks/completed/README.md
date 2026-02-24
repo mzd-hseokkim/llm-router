@@ -233,6 +233,27 @@ tests/e2e/
 
 ---
 
+## Admin JWT Authentication ✅ 완료
+
+**목표**: 정적 master key 인증을 JWT 기반 인증으로 전환, 최초 로그인 시 비밀번호 변경 강제
+
+| 파일 | 변경 |
+|------|------|
+| `migrations/021_create_admin_credentials.sql` | admin_credentials 테이블 생성 |
+| `internal/store/postgres/admin_credential_store.go` | DB CRUD (GetByUsername, UpsertDefault, UpdatePassword) |
+| `internal/auth/jwt.go` | JWTService (HS256, 24h 만료), AdminClaims |
+| `internal/auth/middleware.go` | AdminAuth — JWT 검증으로 변경, GetAdminClaims 추가 |
+| `internal/gateway/handler/admin_auth.go` | Login / ChangePassword / Me 핸들러 |
+| `cmd/gateway/main.go` | bcrypt 시딩, JWTService 생성, 라우트 연결 |
+| `admin-ui/app/api/auth/login/route.ts` | gateway JWT 로그인 API 호출 |
+| `admin-ui/app/api/auth/change-password/route.ts` | 비밀번호 변경 프록시 API |
+| `admin-ui/app/login/page.tsx` | password 필드, force-change redirect |
+| `admin-ui/app/change-password/page.tsx` | 비밀번호 변경 페이지 (신규) |
+| `admin-ui/middleware.ts` | matcher에 change-password 추가 |
+| `admin-ui/components/Sidebar.tsx` | Password 링크 추가 |
+
+---
+
 ## 각 문서 구성
 
 모든 작업 문서는 동일한 구조를 따른다:

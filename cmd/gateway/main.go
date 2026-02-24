@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -56,6 +57,8 @@ import (
 	providermistral "github.com/llm-router/gateway/internal/provider/mistral"
 	provideropenai "github.com/llm-router/gateway/internal/provider/openai"
 	providerselfhosted "github.com/llm-router/gateway/internal/provider/selfhosted"
+	"golang.org/x/crypto/bcrypt"
+
 	"github.com/llm-router/gateway/internal/ratelimit"
 	"github.com/llm-router/gateway/internal/server"
 	pgstore "github.com/llm-router/gateway/internal/store/postgres"
@@ -103,6 +106,22 @@ func main() {
 	keyStore := pgstore.NewVirtualKeyStore(pool)
 	keyCache := auth.NewRedisCache(redisClient)
 	authMw := auth.NewVirtualKeyMiddleware(keyStore, keyCache, logger)
+
+	// --- Admin JWT Auth ---
+	adminCredStore := pgstore.NewAdminCredentialStore(pool)
+	// Seed default admin account with master key as initial password (bcrypt).
+	defaultHash, err := bcrypt.GenerateFromPassword([]byte(cfg.Gateway.MasterKey), bcrypt.DefaultCost)
+	if err != nil {
+		logger.Error("admin seeding: bcrypt failed", "error", err)
+		os.Exit(1)
+	}
+	if err := adminCredStore.UpsertDefault(context.Background(), "admin", string(defaultHash)); err != nil {
+		logger.Error("admin seeding failed", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("default admin account ready")
+	keySum := sha256.Sum256([]byte(cfg.Gateway.MasterKey))
+	jwtSvc := auth.NewJWTService(keySum[:], 24*time.Hour)
 
 	// --- Provider Key Manager ---
 	km, cipher := buildKeyManager(pool, cfg, logger)
@@ -237,7 +256,7 @@ func main() {
 		mcpHub := buildMCPHub(context.Background(), cfg, auditLogger, logger)
 		if mcpHub != nil {
 			defer mcpHub.Close()
-			registerMCPRoutes(r, mcpHub, cfg, logger, authMw.Middleware, auditLogger)
+			registerMCPRoutes(r, mcpHub, cfg, logger, authMw.Middleware, auditLogger, jwtSvc)
 		}
 	}
 
@@ -262,14 +281,14 @@ func main() {
 	// Sync providers/models from DB into registry and pricing table (best-effort).
 	syncProvidersFromDB(context.Background(), pool, registry, costCalc, logger)
 
-	// /admin/* — protected by master key
+	// /admin/* — protected by JWT
 	orgStore := pgstore.NewOrgStore(pool)
 	roleStore := pgstore.NewRoleStore(pool)
 	registerAdminRoutes(r, keyStore, keyCache, km, cipher, pool, logStore, cb, cfg, logger,
 		rateLimiter, budgetMgr, budgetStore, routingStore, orgStore, roleStore, ec, ruleStore, advRouter,
 		auditLogger, auditStore, alertRouter, promptStore, promptSvc,
 		abTestStore, abTestMw, billingStore, chargebackSvc, residencyEnforcer, buildResidencyRegistry(cfg), fr, costCalc, registry,
-		guardrailPolicyStore, guardrailMgr)
+		guardrailPolicyStore, guardrailMgr, jwtSvc, adminCredStore)
 
 	// /auth/* — OAuth / SSO endpoints
 	oauthProviders := buildOAuthProviders(cfg)
@@ -453,14 +472,24 @@ func registerAdminRoutes(
 	registry *provider.Registry,
 	guardrailPolicyStore guardrail.PolicyStore,
 	guardrailMgr *guardrail.Manager,
+	jwtSvc *auth.JWTService,
+	adminCredStore *pgstore.AdminCredentialStore,
 ) {
-	adminMw := auth.AdminAuth(cfg.Gateway.MasterKey)
+	adminMw := auth.AdminAuth(jwtSvc)
+
+	// Login endpoint — no auth required
+	adminAuthHandler := handler.NewAdminAuthHandler(adminCredStore, jwtSvc, rateLimiter, logger)
+	r.Post("/admin/auth/login", adminAuthHandler.Login)
 
 	r.Group(func(r chi.Router) {
 		r.Use(adminMw)
 		if auditLogger != nil {
 			r.Use(audit.Middleware(auditLogger))
 		}
+
+		// Admin auth endpoints (JWT required)
+		r.Post("/admin/auth/change-password", adminAuthHandler.ChangePassword)
+		r.Get("/admin/auth/me", adminAuthHandler.Me)
 
 		// Virtual key CRUD
 		vkHandler := handler.NewAdminKeysHandler(store, cache, logger)
@@ -1042,6 +1071,7 @@ func registerMCPRoutes(
 	logger *slog.Logger,
 	authMw func(http.Handler) http.Handler,
 	auditLog *audit.Logger,
+	jwtSvc *auth.JWTService,
 ) {
 	// Collect server configs for admin handler.
 	cfgs := make([]mcp.ServerConfig, 0, len(cfg.MCP.Servers))
@@ -1069,8 +1099,8 @@ func registerMCPRoutes(
 		r.Post("/mcp/v1/prompts/get", mcpHandler.GetPrompt)
 	})
 
-	// Admin MCP endpoints (protected by master key).
-	adminMw := auth.AdminAuth(cfg.Gateway.MasterKey)
+	// Admin MCP endpoints (protected by JWT).
+	adminMw := auth.AdminAuth(jwtSvc)
 	r.Group(func(r chi.Router) {
 		r.Use(adminMw)
 		r.Get("/admin/mcp/servers", adminMCPHandler.ListServers)

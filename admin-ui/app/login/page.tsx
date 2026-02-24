@@ -14,7 +14,7 @@ const PROVIDER_LABELS: Record<string, { label: string; icon: string }> = {
 
 export default function LoginPage() {
   const router = useRouter();
-  const [key, setKey] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [oauthProviders, setOauthProviders] = useState<OAuthProvider[]>([]);
@@ -31,7 +31,7 @@ export default function LoginPage() {
         }));
         setOauthProviders(providers);
       })
-      .catch(() => { /* providers endpoint not available — fall back to key-only UI */ });
+      .catch(() => { /* providers endpoint not available — fall back to password-only UI */ });
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -42,14 +42,19 @@ export default function LoginPage() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key }),
+        body: JSON.stringify({ password }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setError(data.error ?? "Login failed");
         return;
       }
-      router.push("/");
+      const data = await res.json().catch(() => ({}));
+      if (data.password_changed === false) {
+        router.push("/change-password");
+      } else {
+        router.push("/");
+      }
     } catch {
       setError("Network error — please try again");
     } finally {
@@ -82,24 +87,24 @@ export default function LoginPage() {
             ))}
             <div className="flex items-center gap-2 my-4">
               <div className="flex-1 border-t border-gray-200" />
-              <span className="text-xs text-gray-400">or use admin key</span>
+              <span className="text-xs text-gray-400">or use password</span>
               <div className="flex-1 border-t border-gray-200" />
             </div>
           </div>
         )}
 
-        {/* Master key form */}
+        {/* Password form */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="admin-key" className="block text-sm font-medium text-gray-700 mb-1">
-              Admin Key
+            <label htmlFor="admin-password" className="block text-sm font-medium text-gray-700 mb-1">
+              Password
             </label>
             <input
-              id="admin-key"
+              id="admin-password"
               type="password"
-              value={key}
-              onChange={(e) => setKey(e.target.value)}
-              placeholder="Enter master key"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Enter password"
               required
               autoComplete="current-password"
               className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
