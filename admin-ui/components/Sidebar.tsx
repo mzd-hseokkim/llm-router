@@ -30,7 +30,7 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="w-56 min-h-screen bg-slate-900 text-slate-100 flex flex-col">
+    <aside className="w-56 h-full overflow-y-auto bg-slate-900 text-slate-100 flex flex-col">
       <div className="px-6 py-5 border-b border-slate-700">
         <span className="font-bold text-lg tracking-tight">LLM Router</span>
         <p className="text-xs text-slate-400 mt-0.5">Admin Dashboard</p>
