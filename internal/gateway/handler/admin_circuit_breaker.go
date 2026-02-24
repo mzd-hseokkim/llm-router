@@ -22,7 +22,7 @@ func NewAdminCircuitBreakerHandler(cb *circuitbreaker.CircuitBreaker, logger *sl
 // List returns the state of all tracked circuit breakers.
 func (h *AdminCircuitBreakerHandler) List(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"circuit_breakers": h.cb.AllStatus(),
+		"circuit_breakers": h.cb.AllStatusDetailed(),
 	})
 }
 

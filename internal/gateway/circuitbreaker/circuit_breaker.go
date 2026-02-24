@@ -154,6 +154,40 @@ func (cb *CircuitBreaker) AllStatus() map[string]string {
 	return out
 }
 
+// ProviderStatusDetail holds detailed status for a single provider.
+type ProviderStatusDetail struct {
+	Provider     string     `json:"provider"`
+	State        string     `json:"state"`
+	FailureCount int        `json:"failure_count"`
+	LastFailure  *time.Time `json:"last_failure,omitempty"`
+	ResetTime    *time.Time `json:"reset_time,omitempty"`
+}
+
+// AllStatusDetailed returns per-provider status with failure counts and timestamps.
+func (cb *CircuitBreaker) AllStatusDetailed() []ProviderStatusDetail {
+	cb.mu.Lock()
+	defer cb.mu.Unlock()
+
+	out := make([]ProviderStatusDetail, 0, len(cb.entries))
+	for p, e := range cb.entries {
+		d := ProviderStatusDetail{
+			Provider:     p,
+			State:        e.state.String(),
+			FailureCount: e.failures,
+		}
+		if !e.lastFailureAt.IsZero() {
+			t := e.lastFailureAt
+			d.LastFailure = &t
+			if e.state == StateOpen {
+				rt := e.lastFailureAt.Add(cb.cfg.OpenTimeout)
+				d.ResetTime = &rt
+			}
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
 // ProviderStatus returns the state string for a specific provider.
 // Returns "closed" for providers with no recorded events.
 func (cb *CircuitBreaker) ProviderStatus(provider string) string {
