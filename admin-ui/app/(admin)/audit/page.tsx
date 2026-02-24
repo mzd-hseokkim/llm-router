@@ -73,6 +73,15 @@ export default function AuditPage() {
     setFilters((prev) => ({ ...prev, limit: newLimit, page: 1 }));
   }
 
+  const currentPage = filters.page ?? 1;
+  const pageSize = filters.limit ?? 50;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  function handlePageChange(page: number) {
+    if (page < 1 || page > totalPages) return;
+    setFilters((prev) => ({ ...prev, page }));
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -222,17 +231,58 @@ export default function AuditPage() {
       {/* Footer */}
       <div className="flex items-center justify-between text-sm text-slate-500">
         <span>{total.toLocaleString()} total events</span>
-        <div className="flex items-center gap-2">
-          <span>Per page:</span>
-          <select
-            value={filters.limit ?? 50}
-            onChange={(e) => handleLimitChange(Number(e.target.value))}
-            className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm"
-          >
-            {[25, 50, 100, 200].map((n) => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-          </select>
+        <div className="flex items-center gap-4">
+          {/* Pagination */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => handlePageChange(1)}
+              disabled={currentPage === 1}
+              className="px-2 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="First page"
+            >
+              «
+            </button>
+            <button
+              onClick={() => handlePageChange(currentPage - 1)}
+              disabled={currentPage === 1}
+              className="px-2 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="Previous page"
+            >
+              ‹
+            </button>
+            <span className="px-3 py-1.5">
+              {currentPage} / {totalPages}
+            </span>
+            <button
+              onClick={() => handlePageChange(currentPage + 1)}
+              disabled={currentPage >= totalPages}
+              className="px-2 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="Next page"
+            >
+              ›
+            </button>
+            <button
+              onClick={() => handlePageChange(totalPages)}
+              disabled={currentPage >= totalPages}
+              className="px-2 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              aria-label="Last page"
+            >
+              »
+            </button>
+          </div>
+          {/* Per page */}
+          <div className="flex items-center gap-2">
+            <span>Per page:</span>
+            <select
+              value={filters.limit ?? 50}
+              onChange={(e) => handleLimitChange(Number(e.target.value))}
+              className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm"
+            >
+              {[25, 50, 100, 200].map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
     </div>
