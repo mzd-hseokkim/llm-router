@@ -12,6 +12,7 @@ const nav = [
   { href: "/prompts", label: "Prompts" },
   { href: "/orgs", label: "Organizations" },
   { href: "/guardrails", label: "Guardrails" },
+  { href: "/budgets", label: "Budgets" },
   { href: "/usage", label: "Usage" },
   { href: "/logs", label: "Logs" },
   { href: "/alerts", label: "Alerts" },
