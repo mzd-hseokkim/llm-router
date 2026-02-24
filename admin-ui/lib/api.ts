@@ -866,7 +866,7 @@ export interface CircuitBreaker {
 export const circuitBreakers = {
   list: () =>
     apiFetch<{ circuit_breakers: CircuitBreaker[] }>("/circuit-breakers").then(
-      (r) => r.circuit_breakers
+      (r) => r.circuit_breakers ?? []
     ),
   reset: (provider: string) =>
     apiFetch<{ provider: string; state: string; message: string }>(

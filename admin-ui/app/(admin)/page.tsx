@@ -184,7 +184,7 @@ export default function DashboardPage() {
       {/* Circuit Breaker status */}
       <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
         <h2 className="text-sm font-semibold text-slate-700 mb-4">Circuit Breaker Status</h2>
-        {cbs.length === 0 ? (
+        {!Array.isArray(cbs) || cbs.length === 0 ? (
           <p className="text-sm text-slate-400 text-center py-4">No circuit breakers tracked</p>
         ) : (
           <div className="flex flex-wrap gap-3">
