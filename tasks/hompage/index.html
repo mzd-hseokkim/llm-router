@@ -38,7 +38,7 @@
     .nav-links a:hover { color: var(--blush); background: var(--blush-5); }
     .btn-nav { font-size: 13px !important; font-weight: 600 !important; color: var(--blush) !important; background: var(--blush-8) !important; border: 1px solid var(--blush-20) !important; padding: 6px 16px !important; border-radius: 8px !important; transition: background 0.2s !important; }
     .btn-nav:hover { background: var(--blush-12) !important; }
-    .lang-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; cursor: pointer; background: var(--blush-5); border: 1px solid var(--blush-12); color: var(--blush-60); padding: 6px 14px; border-radius: 8px; transition: all 0.2s; white-space: nowrap; }
+    .lang-toggle { display: flex; align-items: center; cursor: pointer; background: var(--blush-5); border: 1px solid var(--blush-12); color: var(--blush-60); padding: 7px 10px; border-radius: 8px; transition: all 0.2s; }
     .lang-toggle:hover { border-color: var(--blush-20); color: var(--blush); }
     .lang-toggle .lang-flag { font-size: 15px; }
 
@@ -185,8 +185,7 @@
       <a href="#code-example" data-i18n="nav.quickstart">Quickstart</a>
       <a href="#detail" data-i18n="nav.enterprise">Enterprise</a>
       <button class="lang-toggle" onclick="toggleLang()" aria-label="Toggle language">
-        <span class="lang-flag">🌐</span>
-        <span id="lang-btn-label">한국어</span>
+        <img id="lang-btn-flag" src="https://flagcdn.com/w20/kr.png" width="20" height="15" alt="한국어" style="display:block;border-radius:2px;flex-shrink:0">
       </button>
       <a href="https://github.com/mzd-hseokkim/llm-router" class="btn-nav" data-i18n="nav.github">GitHub →</a>
     </div>
@@ -212,7 +211,7 @@
         <a href="#code-example" class="btn-primary" data-i18n="hero.cta1">Get Started →</a>
         <a href="https://github.com/mzd-hseokkim/llm-router" class="btn-secondary">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
-          <span data-i18n="nav.github">View on GitHub</span>
+          <span data-i18n="hero.github">View on GitHub</span>
         </a>
       </div>
       <div class="hero-code-wrap fade-in" style="transition-delay:0.25s">
@@ -246,6 +245,7 @@ response = client.chat.completions.<span class="c-fn">create</span>(
         <div class="provider-badge"><span class="picon">🔵</span> Google Gemini</div>
         <div class="provider-badge"><span class="picon">☁️</span> Azure OpenAI</div>
         <div class="provider-badge"><span class="picon">🟡</span> AWS Bedrock</div>
+        <div style="flex-basis:100%;height:0"></div>
         <div class="provider-badge"><span class="picon">⚡</span> Mistral</div>
         <div class="provider-badge"><span class="picon">🌊</span> Cohere</div>
         <div class="provider-badge"><span class="picon">🦙</span> Ollama</div>
@@ -272,7 +272,7 @@ response = client.chat.completions.<span class="c-fn">create</span>(
       </div>
       <div class="step fade-in" style="transition-delay:0.1s">
         <div class="step-num">2</div>
-        <h3 data-i18n="how.s2.title">Gateway Handles Failover</h3>
+        <h3 data-i18n="how.s2.title">Gateway Routes Intelligently</h3>
         <p data-i18n="how.s2.p">Configured fallback chains route each request to the right provider. Circuit breakers automatically skip unhealthy providers — your traffic keeps flowing.</p>
         <div class="step-code"><span style="color:#79b4f7">fallback</span>: <span style="color:#8fc">[openai, anthropic, gemini]</span></div>
       </div>
@@ -486,7 +486,8 @@ const T = {
     'nav.features':  'Features',
     'nav.quickstart':'Quickstart',
     'nav.enterprise':'Enterprise',
-    'nav.github':    'View on GitHub',
+    'nav.github':    'GitHub →',
+    'hero.github':   'View on GitHub',
     'hero.tag':      'OpenAI-Compatible Gateway',
     'hero.title':    'One Endpoint.<br /><em>Every LLM Provider.</em>',
     'hero.sub':      'Route, optimize, and control all your LLM traffic through a single API. Change only <code style="font-family:\'JetBrains Mono\',monospace;font-size:0.9em;background:var(--blush-8);padding:2px 6px;border-radius:4px">base_url</code> — everything else stays the same.',
@@ -512,8 +513,6 @@ const T = {
     'feat.f2.p':     'Provider API keys are encrypted with AES-256-GCM and never leave the Gateway. Clients see only virtual keys — Provider credentials stay hidden.',
     'feat.f3.t':     'Cost Control & Chargeback',
     'feat.f3.p':     'Per-team soft/hard budgets, real-time cost tracking, and automated chargeback reports. Know exactly where every dollar goes.',
-    'feat.f4.t':     'Advanced Routing',
-    'feat.f4.p':     'Route by model, context length, time-of-day, or metadata. ML-based automatic provider selection optimizes for cost and quality.',
     'feat.f5.t':     'Exact-Match Caching',
     'feat.f5.p':     'Redis-backed exact-match caching for temperature=0 requests. Identical prompts skip the model entirely — instant response, zero cost.',
     'feat.f7.t':     'Guardrails & PII Protection',
@@ -570,7 +569,8 @@ const T = {
     'nav.features':  '기능',
     'nav.quickstart':'빠른 시작',
     'nav.enterprise':'엔터프라이즈',
-    'nav.github':    'GitHub 보기',
+    'nav.github':    'GitHub →',
+    'hero.github':   'GitHub 보기',
     'hero.tag':      'OpenAI 호환 LLM 게이트웨이',
     'hero.title':    '엔드포인트 하나로,<br /><em>모든 LLM 프로바이더를.</em>',
     'hero.sub':      '<code style="font-family:\'JetBrains Mono\',monospace;font-size:0.9em;background:var(--blush-8);padding:2px 6px;border-radius:4px">base_url</code> 하나만 바꾸면 됩니다.<BR> 라우팅, 비용 제어, 보안은 게이트웨이가 알아서 처리합니다.',
@@ -596,8 +596,6 @@ const T = {
     'feat.f2.p':     'AES-256-GCM으로 암호화한 프로바이더 키는 게이트웨이 밖으로 절대 나가지 않습니다. 클라이언트에는 가상 키만 보입니다.',
     'feat.f3.t':     '비용 제어 & 차지백',
     'feat.f3.p':     '팀별 예산 한도 설정, 실시간 비용 모니터링, 자동 차지백 리포트. 비용이 어디서 얼마나 나가는지 한눈에 파악하세요.',
-    'feat.f4.t':     '고급 라우팅',
-    'feat.f4.p':     '모델명, 컨텍스트 길이, 시간대, 메타데이터 조건으로 라우팅. ML 기반 자동 프로바이더 선택으로 비용과 품질을 동시에 최적화합니다.',
     'feat.f5.t':     '정확 매칭 캐시',
     'feat.f5.p':     'temperature=0 요청에 한해 Redis 기반 정확 매칭 캐시를 적용합니다. 동일한 프롬프트는 모델을 거치지 않고 즉시 응답 — 비용 없이.',
     'feat.f7.t':     '가드레일 & PII 보호',
@@ -665,7 +663,9 @@ function applyLang() {
     const v = dict[el.dataset.i18nHtml];
     if (v !== undefined) el.innerHTML = v;
   });
-  document.getElementById('lang-btn-label').textContent = lang === 'en' ? '한국어' : 'English';
+  const flagEl = document.getElementById('lang-btn-flag');
+  flagEl.src = lang === 'en' ? 'https://flagcdn.com/w20/kr.png' : 'https://flagcdn.com/w20/us.png';
+  flagEl.alt = lang === 'en' ? '한국어' : 'English';
   document.documentElement.lang = lang === 'en' ? 'en' : 'ko';
   document.title = lang === 'en'
     ? 'LLM Router — One Endpoint. Every LLM Provider.'
