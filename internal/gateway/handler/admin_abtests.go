@@ -51,6 +51,9 @@ func (h *AdminABTestsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if body.Target.SampleRate <= 0 {
 		body.Target.SampleRate = 1.0
 	}
+	if body.SuccessMetrics == nil {
+		body.SuccessMetrics = []string{}
+	}
 
 	exp := &abtest.Experiment{
 		Name:            body.Name,
@@ -145,6 +148,23 @@ func (h *AdminABTestsHandler) Promote(w http.ResponseWriter, r *http.Request) {
 		_ = h.abMw.Reload(r.Context())
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "completed", "winner": body.Winner})
+}
+
+// Delete handles DELETE /admin/ab-tests/{id}.
+func (h *AdminABTestsHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if err := h.store.Delete(r.Context(), id); err != nil {
+		if err.Error() == "not found" {
+			writeError(w, http.StatusNotFound, "experiment not found", "not_found", "")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error(), "api_error", "")
+		return
+	}
+	if h.abMw != nil {
+		_ = h.abMw.Reload(r.Context())
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *AdminABTestsHandler) transition(w http.ResponseWriter, r *http.Request, status string) {

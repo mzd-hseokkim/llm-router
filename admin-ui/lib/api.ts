@@ -236,6 +236,11 @@ export const keys = {
 
 // --- Providers ---
 
+export const models = {
+  listAll: () =>
+    apiFetch<{ data: Model[] }>("/models").then((r) => r.data ?? []),
+};
+
 export const providers = {
   list: () =>
     apiFetch<{ data: Provider[] }>("/providers").then((r) => r.data),
@@ -451,11 +456,12 @@ export const budgets = {
 
 export interface ABTestTrafficSplit {
   variant: string;
+  model: string;
   weight: number;
 }
 
 export interface ABTestTarget {
-  model: string;
+  team_ids?: string[];
   sample_rate?: number;
 }
 
@@ -484,7 +490,7 @@ export interface CreateABTestPayload {
 }
 
 export const abTests = {
-  list: () => apiFetch<{ data: ABTest[] }>("/ab-tests").then((r) => r.data),
+  list: () => apiFetch<{ data: ABTest[] }>("/ab-tests").then((r) => r.data ?? []),
   get: (id: string) => apiFetch<ABTest>(`/ab-tests/${id}`),
   create: (payload: CreateABTestPayload) =>
     apiFetch<ABTest>("/ab-tests", { method: "POST", body: JSON.stringify(payload) }),
@@ -500,6 +506,8 @@ export const abTests = {
       method: "POST",
       body: JSON.stringify({ winner }),
     }),
+  delete: (id: string) =>
+    fetch(`${BASE}/ab-tests/${id}`, { method: "DELETE" }),
 };
 
 // --- Prompts ---

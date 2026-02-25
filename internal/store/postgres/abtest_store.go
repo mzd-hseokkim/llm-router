@@ -61,7 +61,7 @@ func (s *ABTestStore) List(ctx context.Context) ([]*abtest.Experiment, error) {
 	}
 	defer rows.Close()
 
-	var result []*abtest.Experiment
+	result := make([]*abtest.Experiment, 0)
 	for rows.Next() {
 		exp, err := scanExperiment(rows)
 		if err != nil {
@@ -70,6 +70,18 @@ func (s *ABTestStore) List(ctx context.Context) ([]*abtest.Experiment, error) {
 		result = append(result, exp)
 	}
 	return result, rows.Err()
+}
+
+// Delete removes an experiment by ID.
+func (s *ABTestStore) Delete(ctx context.Context, id string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM ab_tests WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("abtest_store delete: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("not found")
+	}
+	return nil
 }
 
 // UpdateStatus transitions an experiment to a new status and (optionally) records a winner.

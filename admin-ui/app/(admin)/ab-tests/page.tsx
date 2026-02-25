@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { abTests, ABTest } from "@/lib/api";
+import { abTests, models as modelsApi, ABTest, Model } from "@/lib/api";
 
 // ---------------------------------------------------------------------------
 // Local types — supplement lib/api.ts which lacks some backend fields
@@ -88,6 +88,10 @@ function CreateDialog({
   onCreated: () => void;
 }) {
   const qc = useQueryClient();
+  const { data: availableModels = [] } = useQuery<Model[]>({
+    queryKey: ["models-all"],
+    queryFn: modelsApi.listAll,
+  });
   const [form, setForm] = useState<CreateFormState>({
     name: "",
     splits: [
@@ -109,8 +113,8 @@ function CreateDialog({
     mutationFn: () =>
       abTests.create({
         name: form.name.trim(),
-        traffic_split: form.splits.map(s => ({ variant: s.variant, weight: s.weight })),
-        target: { model: form.splits[0]?.model ?? "", sample_rate: form.sample_rate },
+        traffic_split: form.splits.map(s => ({ variant: s.variant, model: s.model, weight: s.weight })),
+        target: { sample_rate: form.sample_rate },
         min_samples: form.min_samples,
         confidence_level: form.confidence_level,
         ...(form.start_at ? { start_at: new Date(form.start_at).toISOString() } : {}),
@@ -184,12 +188,18 @@ function CreateDialog({
                     value={s.variant}
                     onChange={e => updateSplit(idx, "variant", e.target.value)}
                   />
-                  <input
-                    className="flex-1 border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
-                    placeholder="e.g. gpt-4o"
+                  <select
+                    className="flex-1 border border-slate-300 rounded-lg px-2 py-1.5 text-sm bg-white"
                     value={s.model}
                     onChange={e => updateSplit(idx, "model", e.target.value)}
-                  />
+                  >
+                    <option value="">— Select model —</option>
+                    {availableModels.map(m => (
+                      <option key={m.id} value={m.model_id}>
+                        {m.display_name ?? m.model_id}
+                      </option>
+                    ))}
+                  </select>
                   <input
                     className="w-20 border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
                     type="number"
@@ -512,6 +522,11 @@ export default function ABTestsPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["ab-tests"] }),
     onError: (e: Error) => setTransitionError(e.message),
   });
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => abTests.delete(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["ab-tests"] }),
+    onError: (e: Error) => setTransitionError(e.message),
+  });
 
   function handleResultsToggle(test: ABTest) {
     setResultsTest(prev => prev?.id === test.id ? null : test);
@@ -550,6 +565,19 @@ export default function ABTestsPage() {
             className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200"
           >
             Promote
+          </button>
+        )}
+        {(test.status === "draft" || test.status === "stopped" || test.status === "completed") && (
+          <button
+            onClick={() => {
+              if (confirm(`"${test.name}" 실험을 삭제하시겠습니까?`)) {
+                setTransitionError(null);
+                deleteMutation.mutate(test.id);
+              }
+            }}
+            className="text-xs px-2 py-1 rounded bg-red-50 text-red-600 hover:bg-red-100"
+          >
+            Delete
           </button>
         )}
         {test.status !== "draft" && (

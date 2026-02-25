@@ -363,6 +363,22 @@ func (h *AdminProvidersHandler) DeleteProvider(w http.ResponseWriter, r *http.Re
 
 // --- Model handlers ---
 
+// ListAllModels handles GET /admin/models — returns all enabled models across all providers.
+func (h *AdminProvidersHandler) ListAllModels(w http.ResponseWriter, r *http.Request) {
+	recs, err := h.modelStore.ListEnabled(r.Context())
+	if err != nil {
+		h.logger.Error("failed to list all models", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list models", "internal_error", "")
+		return
+	}
+
+	resp := make([]modelResponse, 0, len(recs))
+	for _, rec := range recs {
+		resp = append(resp, toModelResponse(rec))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": resp})
+}
+
 // ListModels handles GET /admin/providers/{id}/models.
 func (h *AdminProvidersHandler) ListModels(w http.ResponseWriter, r *http.Request) {
 	providerID, ok := parseUUID(w, chi.URLParam(r, "id"))
