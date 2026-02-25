@@ -94,7 +94,11 @@ func main() {
 	logger.Info("database connected")
 
 	// --- Redis ---
-	redisClient := redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr})
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:         cfg.Redis.Addr,
+		PoolSize:     cfg.Redis.PoolSize,
+		MinIdleConns: cfg.Redis.MinIdleConns,
+	})
 	if err := redisClient.Ping(context.Background()).Err(); err != nil {
 		logger.Error("failed to connect to redis", "error", err)
 		os.Exit(1)

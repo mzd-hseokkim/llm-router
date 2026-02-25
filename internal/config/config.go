@@ -233,9 +233,11 @@ type FallbackTargetConfig struct {
 }
 
 type ServerConfig struct {
-	Port         int           `koanf:"port"`
-	ReadTimeout  time.Duration `koanf:"read_timeout"`
-	WriteTimeout time.Duration `koanf:"write_timeout"`
+	Port              int           `koanf:"port"`
+	ReadTimeout       time.Duration `koanf:"read_timeout"`
+	WriteTimeout      time.Duration `koanf:"write_timeout"`
+	IdleTimeout       time.Duration `koanf:"idle_timeout"`
+	ReadHeaderTimeout time.Duration `koanf:"read_header_timeout"`
 }
 
 type DatabaseConfig struct {
@@ -244,7 +246,9 @@ type DatabaseConfig struct {
 }
 
 type RedisConfig struct {
-	Addr string `koanf:"addr"`
+	Addr         string `koanf:"addr"`
+	PoolSize     int    `koanf:"pool_size"`
+	MinIdleConns int    `koanf:"min_idle_conns"`
 }
 
 type LogConfig struct {
@@ -374,8 +378,20 @@ func applyDefaults(cfg *Config) {
 	if cfg.Database.MaxConnections == 0 {
 		cfg.Database.MaxConnections = 20
 	}
+	if cfg.Server.IdleTimeout == 0 {
+		cfg.Server.IdleTimeout = 60 * time.Second
+	}
+	if cfg.Server.ReadHeaderTimeout == 0 {
+		cfg.Server.ReadHeaderTimeout = 10 * time.Second
+	}
 	if cfg.Redis.Addr == "" {
 		cfg.Redis.Addr = "localhost:6379"
+	}
+	if cfg.Redis.PoolSize == 0 {
+		cfg.Redis.PoolSize = 50
+	}
+	if cfg.Redis.MinIdleConns == 0 {
+		cfg.Redis.MinIdleConns = 10
 	}
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"

@@ -31,10 +31,12 @@ func New(cfg config.ServerConfig, logger *slog.Logger) *Server {
 		router: r,
 		logger: logger,
 		http: &http.Server{
-			Addr:         fmt.Sprintf(":%d", cfg.Port),
-			Handler:      r,
-			ReadTimeout:  cfg.ReadTimeout,
-			WriteTimeout: cfg.WriteTimeout,
+			Addr:              fmt.Sprintf(":%d", cfg.Port),
+			Handler:           r,
+			ReadTimeout:       cfg.ReadTimeout,
+			WriteTimeout:      cfg.WriteTimeout,
+			IdleTimeout:       cfg.IdleTimeout,
+			ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 		},
 	}
 	return s

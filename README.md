@@ -16,6 +16,7 @@
 - [Admin 대시보드](#admin-대시보드)
 - [Admin API 주요 기능](#admin-api-주요-기능)
 - [빌드 및 테스트](#빌드-및-테스트)
+- [성능 최적화 가이드](#성능-최적화-가이드)
 
 ---
 
@@ -362,3 +363,175 @@ make e2e
 `.env.local` 파일에 저장하면 `make run`·`scripts/start.sh` 실행 시 자동 로드된다.
 
 > **주의**: `config/config.yaml`의 API Key나 Master Key는 예시값이다. 프로덕션에서는 반드시 환경변수로 주입하고 실제 값을 커밋하지 않는다.
+
+---
+
+## 성능 최적화 가이드
+
+기본값은 개발 편의 우선으로 보수적으로 설정되어 있다. 프로덕션에서 고성능을 끌어내려면 아래 항목을 조정해야 한다.
+
+---
+
+### 1. DB 커넥션 풀 (가장 중요)
+
+기본값 `max_connections: 20`은 동시 요청 100+ 시 즉시 포화된다.
+
+**`config/config.yaml`**
+```yaml
+database:
+  max_connections: 100   # 소규모: 50~100 / 프로덕션: 200+
+```
+
+아래 공식을 참고해 적정값을 산출한다.
+```
+max_connections ≈ (서버 코어 수 × 2) + 유효 스핀들 수
+```
+
+PostgreSQL 서버 `max_connections` 도 함께 상향해야 한다 (기본값 100). PgBouncer를 앞에 두면 실제 DB 연결을 줄이면서 Gateway 풀은 넉넉하게 유지할 수 있다.
+
+---
+
+### 2. Redis 커넥션 풀
+
+`go-redis` 기본 `PoolSize`는 CPU 수의 10배로 자동 설정되지만, 레이트 리밋·캐시·세션이 모두 Redis를 공유하므로 명시적으로 늘리는 것을 권장한다.
+
+**`config/config.yaml`**
+```yaml
+redis:
+  addr: "localhost:6380"
+  pool_size: 50        # 추가 (기본값보다 명시적으로 설정)
+  min_idle_conns: 10   # 추가 (콜드 스타트 시 지연 감소)
+```
+
+`cmd/gateway/main.go`에서 `redis.NewClient` 생성 시 해당 값을 반영한다.
+
+---
+
+### 3. HTTP 서버 타임아웃
+
+현재 `IdleTimeout`과 `ReadHeaderTimeout`이 설정되어 있지 않아 커넥션 누수 및 Slowloris 공격에 취약하다.
+
+**`cmd/gateway/main.go`**
+```go
+srv := &http.Server{
+    Addr:              fmt.Sprintf(":%d", cfg.Port),
+    Handler:           r,
+    ReadTimeout:       cfg.ReadTimeout,        // 30s
+    WriteTimeout:      cfg.WriteTimeout,       // 60s
+    IdleTimeout:       60 * time.Second,       // 추가
+    ReadHeaderTimeout: 10 * time.Second,       // 추가 (Slowloris 방어)
+}
+```
+
+---
+
+### 4. Provider HTTP 클라이언트 전역 풀
+
+`MaxIdleConns`의 Go 기본값은 **100**이지만, `MaxIdleConnsPerHost`가 2로 묶여 있어 실질적인 병목이 된다. 반대로 현재 코드는 `MaxIdleConnsPerHost: 100`으로 올바르게 설정되어 있으나, 전역 `MaxIdleConns`를 명시하지 않으면 다수 Provider 동시 사용 시 제약이 생길 수 있다.
+
+**`internal/provider/*/adapter.go`** — 각 Provider 클라이언트 생성부
+```go
+Transport: &http.Transport{
+    MaxIdleConns:        1000,  // 추가 (전역 유휴 커넥션 상한)
+    MaxIdleConnsPerHost: 100,   // 기존 유지
+    IdleConnTimeout:     90 * time.Second, // 추가
+    // ... 기존 설정 유지
+}
+```
+
+---
+
+### 5. 동시 접속 리미터 활성화
+
+`internal/ratelimit/concurrency_limiter.go`는 구현되어 있지만 라우터에 연결되어 있지 않다. 무제한 동시 요청은 메모리 고갈로 이어질 수 있다.
+
+**`internal/gateway/router.go`** — 미들웨어 체인에 추가
+```go
+concLimiter := ratelimit.NewConcurrencyLimiter(cfg.MaxConcurrentRequests) // 예: 500
+r.Use(concLimiter.Middleware)
+```
+
+**`config/config.yaml`**
+```yaml
+gateway:
+  max_concurrent_requests: 500  # 서버 사양에 맞게 조정
+```
+
+---
+
+### 6. 부하 테스트 (성능 실측)
+
+설정 변경 후 반드시 부하 테스트로 검증한다.
+
+```bash
+# hey (Go 내장, 빠른 검증)
+go install github.com/rakyll/hey@latest
+hey -n 10000 -c 200 -H "Authorization: Bearer vk-..." \
+    http://localhost:8080/v1/chat/completions
+
+# k6 (시나리오 기반, 권장)
+k6 run --vus 100 --duration 60s tests/load/smoke.js
+```
+
+핵심 지표:
+
+| 지표 | 목표 (소규모) | 목표 (프로덕션) |
+|---|---|---|
+| P50 레이턴시 (캐시 히트) | < 5ms | < 2ms |
+| P99 레이턴시 (Provider 호출) | < 3s | < 2s |
+| 처리량 (RPS) | 500+ | 5,000+ |
+| 에러율 | < 0.1% | < 0.01% |
+
+---
+
+### 7. Go 런타임 튜닝
+
+```bash
+# GOMAXPROCS: 기본값(CPU 코어 수)이 대부분 최적이나,
+# Docker cgroup 환경에서는 automaxprocs 라이브러리 사용을 권장
+go get go.uber.org/automaxprocs
+```
+
+**`cmd/gateway/main.go`**
+```go
+import _ "go.uber.org/automaxprocs" // cgroup CPU 제한을 자동 반영
+```
+
+GC 튜닝: 메모리 여유가 있다면 GC 빈도를 낮춰 레이턴시를 개선할 수 있다.
+```bash
+GOGC=200 ./gateway  # 기본값 100에서 상향 (메모리 ↑, GC 빈도 ↓)
+```
+
+---
+
+### 8. 프로파일링 (병목 진단)
+
+`/debug/pprof` 엔드포인트를 활성화하면 실행 중 프로파일 수집이 가능하다.
+
+```bash
+# CPU 프로파일 (30초)
+go tool pprof http://localhost:6060/debug/pprof/profile?seconds=30
+
+# 고루틴 누수 확인
+go tool pprof http://localhost:6060/debug/pprof/goroutine
+
+# 메모리 힙
+go tool pprof http://localhost:6060/debug/pprof/heap
+```
+
+> **주의**: `/debug/pprof`는 내부 네트워크에서만 접근 가능하도록 방화벽·미들웨어로 보호해야 한다.
+
+---
+
+### 최적화 체크리스트
+
+| 항목 | 기본값 | 권장값 | 상태 |
+|---|---|---|---|
+| DB `max_connections` | 20 | 100+ | 설정 필요 |
+| Redis `pool_size` | auto | 50 | 설정 필요 |
+| HTTP `IdleTimeout` | 없음 | 60s | 코드 수정 필요 |
+| HTTP `ReadHeaderTimeout` | 없음 | 10s | 코드 수정 필요 |
+| Provider `MaxIdleConns` | 100 | 1000 | 코드 수정 필요 |
+| 동시 접속 리미터 | 비활성 | 500 | 코드 연결 필요 |
+| `automaxprocs` | 미적용 | 적용 | 의존성 추가 필요 |
+| 부하 테스트 | 없음 | k6 스크립트 | 작성 필요 |
